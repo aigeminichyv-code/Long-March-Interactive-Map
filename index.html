@@ -66,12 +66,12 @@
       .leaflet-pane { z-index: 10; }
       .leaflet-bottom, .leaflet-top { z-index: 40; }
     </style>
-  <script type="importmap">
+    <script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@18.2.0",
     "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "lucide-react": "https://esm.sh/lucide-react@0.263.1",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1?external=react",
     "leaflet": "https://esm.sh/leaflet@1.9.4",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/"
@@ -82,7 +82,7 @@
 </head>
   <body>
     <div id="root"></div>
-    <script type="text/babel" data-type="module" data-presets="react,typescript">
+    <script type="text/babel" data-type="module">
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -1053,7 +1053,11 @@ const LeafletMapView = ({ currentStep, onNodeClick }) => {
   const polylineRef = useRef(null);
 
   useEffect(() => {
+    // Check if the container exists and map isn't already initialized
     if (!mapInstanceRef.current && mapRef.current) {
+      // Ensure we have data before trying to access coords
+      if (!MILESTONES || MILESTONES.length === 0) return;
+
       const map = L.map(mapRef.current, {
         zoomControl: false,
         attributionControl: false
@@ -1085,12 +1089,18 @@ const LeafletMapView = ({ currentStep, onNodeClick }) => {
     }
 
     return () => {
+      // Cleanup map on unmount
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+        markersRef.current = [];
+      }
     };
   }, []);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (map && markersRef.current.length > 0) {
+    if (map && markersRef.current.length > 0 && MILESTONES && MILESTONES[currentStep]) {
       markersRef.current.forEach((marker, idx) => {
          const isActive = idx === currentStep;
          const iconHtml = `<div class="marker-pin ${isActive ? 'active' : ''}">${isActive ? '★' : idx + 1}</div>`;
