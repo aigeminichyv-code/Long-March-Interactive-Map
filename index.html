@@ -4,915 +4,1416 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>二萬五千里長征 - 交互式教學地圖</title>
-    
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- React & ReactDOM (UMD) -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    
-    <!-- Babel for JSX -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Babel for in-browser compilation -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
     <style>
-      /* --- 全局主題：紅星與黃土 (Red Star & Aged Paper) --- */
       :root {
         --paper-bg: #fdfbf7;
         --ink-color: #2c2420;
-        --red-primary: #b71c1c;
-        --gold-accent: #ffd600;
       }
-      
       body {
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        color: var(--ink-color);
+        font-family: system-ui, -apple-system, serif;
         background-color: #f5f0e1;
-        overflow: hidden; /* 防止 body 滾動，使用內部容器 */
+        color: var(--ink-color);
         margin: 0;
+        overflow: hidden;
       }
-
-      /* 仿古襯線體 */
-      h1, h2, h3, h4, .font-serif {
+      .font-serif {
         font-family: "Songti SC", "SimSun", "Times New Roman", serif;
       }
-
-      /* 自定義動畫 */
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: #e6e2d3; }
+      ::-webkit-scrollbar-thumb { background: #bcaaa4; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #8d6e63; }
+      
+      /* Leaflet Customization */
+      .leaflet-container {
+        background: #e0e0e0;
+        z-index: 0;
+      }
+      .custom-div-icon {
+        background: transparent;
+        border: none;
+      }
+      .marker-pin {
+        width: 24px; height: 24px;
+        border-radius: 50%;
+        background: #b71c1c;
+        border: 2px solid white;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        display: flex; align-items: center; justify-content: center;
+        color: white; font-weight: bold; font-size: 12px;
+        transition: transform 0.2s;
+      }
+      .marker-pin.active {
+        background: #ffd600;
+        border-color: #b71c1c;
+        color: #b71c1c;
+        transform: scale(1.3);
+        z-index: 1000;
+      }
+      
+      /* Animation Utilities */
       @keyframes fadeInZoom {
         from { opacity: 0; transform: scale(0.95); }
         to { opacity: 1; transform: scale(1); }
       }
-      @keyframes slideUpFade {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
       .animate-fade-in-zoom { animation: fadeInZoom 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-      .animate-slide-up { animation: slideUpFade 0.4s ease-out forwards; }
-
-      /* 滾動條樣式 */
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: #e6e2d3; }
-      ::-webkit-scrollbar-thumb { 
-        background: #bcaaa4; 
-        border-radius: 4px; 
-        border: 2px solid #e6e2d3; 
-      }
-      ::-webkit-scrollbar-thumb:hover { background: #8d6e63; }
-
-      .bg-paper {
-        background-color: var(--paper-bg);
-        background-image: url("https://www.transparenttextures.com/patterns/cream-dust.png");
-      }
       
-      .no-scrollbar::-webkit-scrollbar { display: none; }
-      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      .leaflet-pane { z-index: 10; }
+      .leaflet-bottom, .leaflet-top { z-index: 40; }
     </style>
-  </head>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1",
+    "leaflet": "https://esm.sh/leaflet@1.9.4",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
   <body>
     <div id="root"></div>
+    <script type="text/babel" data-type="module" data-presets="react,typescript">
+import React, { useState, useEffect, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
+import { 
+  Star, Trophy, Info, ChevronLeft, ChevronRight, MapPin, Users, BookOpen, Tent, 
+  HelpCircle, Flag, Music, ScrollText, Flame, X, CheckCircle, XCircle, RefreshCw, 
+  Wheat, Heart, AlertTriangle, ArrowRight, Skull, Medal, Scroll 
+} from 'lucide-react';
+import * as L from 'leaflet';
 
-    <script type="text/babel" data-presets="react">
-      const { useState, useEffect, useRef } = React;
+// --- TYPES ---
 
-      // --- 1. 圖標組件 (SVG Wrapper) ---
-      // 這裡包含了所有使用到的 Lucide 圖標的 SVG 定義
-      const Icon = ({ children, size = 24, className = "", ...props }) => (
-        <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>
-      );
-      
-      // Navigation & UI
-      const ChevronRight = (p) => <Icon {...p}><path d="m9 18 6-6-6-6"/></Icon>;
-      const ChevronLeft = (p) => <Icon {...p}><path d="m15 18-6-6 6-6"/></Icon>;
-      const X = (p) => <Icon {...p}><path d="M18 6 6 18"/><path d="m6 6 18 18"/></Icon>;
-      const ArrowRight = (p) => <Icon {...p}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></Icon>;
-      const RefreshCw = (p) => <Icon {...p}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></Icon>;
-      
-      // Context & Meaning
-      const MapPin = (p) => <Icon {...p}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></Icon>;
-      const BookOpen = (p) => <Icon {...p}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></Icon>;
-      const HelpCircle = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></Icon>;
-      const Info = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></Icon>;
-      const Flag = (p) => <Icon {...p}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></Icon>;
-      const Star = (p) => <Icon {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></Icon>;
-      const Users = (p) => <Icon {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Icon>;
-      const Tent = (p) => <Icon {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2Z"/><path d="m2 21 20-18"/><path d="m22 21-20-18"/></Icon>;
-      const Flame = (p) => <Icon {...p}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-2.072-2.143-3-3a6.5 6.5 0 1 0 12 0c-.928.857-1.928.857-3 3-.5 1-1 1.62-1 3a2.5 2.5 0 0 0 2.5 2.5"/></Icon>;
-      const Scroll = (p) => <Icon {...p}><path d="M8 2h8a4 4 0 0 1 0 8h-1a2 2 0 0 0 0 4h1a4 4 0 0 1 0 8H8a2 2 0 0 1 0-4h1a2 2 0 0 0 0-4H8a2 2 0 0 1 0-4h1a2 2 0 0 0 0-4H8a2 2 0 0 1 0-8Z"/></Icon>;
-      
-      // Game & Quiz
-      const Trophy = (p) => <Icon {...p}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></Icon>;
-      const Medal = (p) => <Icon {...p}><path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/></Icon>;
-      const ShieldCheck = (p) => <Icon {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></Icon>;
-      const CheckCircle = (p) => <Icon {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m22 4-12 12-4-4"/></Icon>;
-      const XCircle = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></Icon>;
-      const AlertTriangle = (p) => <Icon {...p}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></Icon>;
-      const Skull = (p) => <Icon {...p}><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M8 20v2h8v-2"/><path d="m12.5 17-.5-1-.5 1h1z"/><path d="M16 20a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20"/></Icon>;
-      
-      // Survival Resources (Previously missing, causing crash)
-      const Wheat = (p) => <Icon {...p}><path d="M2 22 16 8"/><path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L2 22l4.53-4.53a3.5 3.5 0 0 1 4.94 0L13 19l-1.53 1.53"/><path d="M2 22 16 8"/><path d="M8.47 7.53 10 6l1.53 1.53a3.5 3.5 0 0 1 0 4.94L7 17l4.53-4.53a3.5 3.5 0 0 1 4.94 0L18 14l-1.53 1.53"/><path d="M20 4h2v2a4 4 0 0 1-4 4h-2V8a4 4 0 0 1 4-4Z"/></Icon>;
-      const Heart = (p) => <Icon {...p}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></Icon>;
+interface HistoricalFigure {
+  name: string;
+  role: string;
+  desc: string;
+}
 
-      // Map Decorations
-      const Mountain = (p) => <Icon {...p}><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></Icon>;
-      const Waves = (p) => <Icon {...p}><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></Icon>;
+interface QuizOption {
+  label: string;
+  // Index of correct option
+}
 
-      // --- 2. 數據資料 (Constants) ---
-      const MILESTONES = [
-        {
-          id: 0,
-          title: "瑞金出發",
-          date: "1934年10月",
-          location: "江西瑞金",
-          coords: { x: 72, y: 72 },
-          description: "由於第五次反「圍剿」失敗，中央紅軍（紅一方面軍）主力開始進行戰略轉移。這是一次被逼無奈的撤退，初期攜帶了大量輜重（壇壇罐罐），行軍速度極慢。",
-          significance: "紅軍被迫撤離中央蘇區，開始了艱苦卓絕的戰略大轉移。這是長征的起點。",
-          figures: [
-            { name: "博古", role: "中共中央總負責人", desc: "推行「左」傾錯誤路線，導致反圍剿失敗。" },
-            { name: "李德", role: "共產國際軍事顧問", desc: "掌握軍事指揮權，採取機械的陣地戰。" }
-          ],
-          survival: {
-            title: "搬家式行軍",
-            content: "出發初期，紅軍實行「大搬家」，攜帶了印刷機、X光機甚至桌椅板凳。這些笨重的輜重嚴重拖慢了行軍速度，讓紅軍在突破封鎖線時付出了極大代價。"
-          },
-          stat: { label: "出發人數", value: "8.6萬餘人", icon: "users" },
-          quizzes: [
-            { question: "長征的出發點主要是在哪個省份？", options: ["陝西", "江西", "貴州", "四川"], answer: 1, explanation: "中央紅軍是從江西瑞金（中央蘇區）出發的。" },
-            { question: "導致紅軍被迫進行戰略轉移（長征）的直接原因是？", options: ["第四次反圍剿失敗", "第五次反圍剿失敗", "北上抗日", "擴大根據地"], answer: 1, explanation: "第五次反圍剿失敗後，中央紅軍無法在中央蘇區立足，被迫轉移。" },
-            { question: "長征初期，紅軍行軍速度緩慢的主要原因是？", options: ["攜帶大量輜重（壇壇罐罐）", "道路被破壞", "等待援軍", "天氣惡劣"], answer: 0, explanation: "「大搬家」式的行軍攜帶了過多笨重物資，嚴重拖累了部隊速度。" }
-          ],
-          game: {
-            scenario: "【歷史抉擇】大撤退開始，後勤部將造幣機、X光機甚至笨重的桌椅都打包帶上了，隊伍變成了「甬道式」搬家，日行僅幾十里。敵軍碉堡群就在前方，你作為指揮員建議：",
-            options: [
-              { label: "堅決丟棄重型輜重，輕裝突圍", foodChange: -5, moraleChange: 10, result: "歷史正確選擇！雖然損失了設備，但部隊機動性大增，減少了突破封鎖線時的傷亡。" },
-              { label: "全數攜帶，這些是革命的家當", foodChange: -20, moraleChange: -15, result: "錯誤的「大搬家」！部隊臃腫不堪，在湘江戰役中成為敵機轟炸的活靶子，傷亡慘重。" },
-              { label: "徵用民夫協助搬運", foodChange: -15, moraleChange: -10, result: "增加了糧食消耗，且民夫在戰亂中四散逃跑，造成了更大的混亂。" },
-              { label: "就地掩埋，留下標記待日後取回", foodChange: -10, moraleChange: 0, result: "折衷方案。雖然減輕了負擔，但掩埋工作耗費了寶貴的突圍時間。" }
-            ]
-          }
-        },
-        {
-          id: 1,
-          title: "血戰湘江",
-          date: "1934年11月",
-          location: "廣西全州",
-          coords: { x: 65, y: 70 },
-          description: "長征中最慘烈的一戰。紅軍突破國民黨軍第四道封鎖線，但由於隊伍臃腫和指揮失誤，付出了極其慘重的代價。湘江水被紅軍戰士的鮮血染紅。",
-          significance: "雖然突破了封鎖，但慘重的犧牲（損兵折將過半）引發了廣大指戰員對軍事指揮錯誤的強烈不滿，為遵義會議的召開埋下伏筆。",
-          figures: [
-            { name: "陳樹湘", role: "紅34師師長", desc: "率領全師擔任後衛，彈盡糧絕後腹部中彈，斷腸明志，壯烈犧牲。" }
-          ],
-          survival: {
-            title: "三年不飲湘江水",
-            content: "戰役過後，當地百姓流傳著「三年不飲湘江水，十年不食湘江魚」的說法，可見戰況之慘烈，屍橫遍野。"
-          },
-          stat: { label: "人員銳減", value: "8.6萬 → 3萬", icon: "users" },
-          quizzes: [
-            { question: "湘江戰役後，紅軍人數發生了什麼變化？", options: ["增加了一倍", "基本持平", "銳減過半", "全部犧牲"], answer: 2, explanation: "湘江戰役是長征中最慘烈的戰役，紅軍人數由8.6萬銳減至3萬餘人。" },
-            { question: "湘江戰役中，負責後衛任務最終全軍覆沒的是哪支部隊？", options: ["紅一軍團", "紅三軍團", "紅34師", "紅五軍團"], answer: 2, explanation: "紅34師作為「絕命後衛師」，為掩護主力過江，最終全軍覆沒，師長陳樹湘壯烈犧牲。" },
-            { question: "湘江戰役的慘敗直接導致了後來哪次會議的召開？", options: ["古田會議", "遵義會議", "瓦窯堡會議", "洛川會議"], answer: 1, explanation: "慘重的犧牲引發了對錯誤指揮的不滿，直接推動了遵義會議的召開以糾正錯誤。" }
-          ],
-          game: {
-            scenario: "【生死關頭】搶渡湘江！兩側敵軍已形成口袋陣，後衛紅34師被截斷在江東。江面敵機俯衝轟炸，江水已染紅。主力部隊還有大量人員未過江。",
-            options: [
-              { label: "命令紅34師死守陣地，掩護軍委過江", foodChange: -5, moraleChange: -25, result: "壯烈的犧牲！紅34師全軍覆沒（陳樹湘斷腸明志），主力倖存但士氣跌至谷底。" },
-              { label: "主力部隊回頭接應後衛", foodChange: -30, moraleChange: 5, result: "軍事自殺！主力重回包圍圈，導致紅軍面臨全軍覆沒的危險。" },
-              { label: "化整為零，分散突圍", foodChange: -15, moraleChange: -20, result: "部隊建制被打散，大量非戰鬥減員，紅軍可能就此潰散。" },
-              { label: "拋棄所有文件與機器，強行涉水", foodChange: -10, moraleChange: -5, result: "丟棄了最後的包袱，雖然損失物資，但保住了剩餘的有生力量。" }
-            ]
-          }
-        },
-        {
-          id: 2,
-          title: "遵義會議",
-          date: "1935年1月",
-          location: "貴州遵義",
-          coords: { x: 52, y: 62 },
-          description: "中共中央在遵義召開政治局擴大會議。會議集中全力解決了當時具有決定意義的軍事和組織問題，糾正了「左」傾教條主義錯誤。",
-          significance: "確立了毛澤東在黨和紅軍中的領導地位，在極其危急的關頭挽救了黨，挽救了紅軍，是黨的歷史上一個生死攸關的轉折點。",
-          figures: [
-            { name: "毛澤東", role: "政治局常委", desc: "在會議上批評了單純防禦路線，增選為政治局常委。" },
-            { name: "王稼祥", role: "紅軍總政治部主任", desc: "投出了關鍵一票，支持毛澤東的主張。" }
-          ],
-          survival: {
-            title: "難得的休整",
-            content: "佔領遵義後，紅軍獲得了長征以來難得的12天休整時間。戰士們補充了給養，更重要的是，精神面貌煥然一新。"
-          },
-          stat: { label: "會議時長", value: "3天", icon: "info" },
-          quizzes: [
-            { question: "遵義會議被認為是中國共產黨歷史上的什麼？", options: ["生死攸關的轉折點", "長征的結束點", "建黨的開始", "國共合作的起點"], answer: 0, explanation: "遵義會議挽救了黨和紅軍，是歷史上生死攸關的轉折點。" },
-            { question: "遵義會議主要解決了什麼問題？", options: ["政治和思想問題", "軍事和組織問題", "經濟和文化問題", "外交和統一戰線問題"], answer: 1, explanation: "會議集中全力解決了當時最緊迫的軍事問題和組織問題（領導權）。" },
-            { question: "遵義會議事實上確立了誰在黨和紅軍中的領導地位？", options: ["周恩來", "朱德", "毛澤東", "王稼祥"], answer: 2, explanation: "會議增選毛澤東為政治局常委，事實上確立了他的領導地位。" }
-          ],
-          game: {
-            scenario: "【路線之爭】攻占遵義後，黨內對「李德式」的機械指揮怨聲載道。是否召開政治局擴大會議進行徹底檢討？還是繼續聽從共產國際顧問的指揮？",
-            options: [
-              { label: "支持毛澤東，批判單純防禦路線", foodChange: 5, moraleChange: 40, result: "歷史轉折點！確立了正確的軍事路線，紅軍重獲生機，士氣空前高漲！" },
-              { label: "維護權威，繼續聽從李德指揮", foodChange: 0, moraleChange: -30, result: "錯誤路線繼續！部隊將繼續在那條通往失敗的道路上撞得頭破血流。" },
-              { label: "專注於補充糧草，不談政治", foodChange: 20, moraleChange: -10, result: "肚子飽了，但腦袋依然糊塗。之後的戰鬥依然會因為錯誤指揮而失敗。" },
-              { label: "提出分兵作戰以分散風險", foodChange: -10, moraleChange: -20, result: "兵力分散將被國民黨各個擊破，這是嚴重的軍事冒險。" }
-            ]
-          }
-        },
-        {
-          id: 3,
-          title: "四渡赤水",
-          date: "1935年1月-3月",
-          location: "川黔邊界",
-          coords: { x: 50, y: 60 },
-          description: "在毛澤東指揮下，紅軍在赤水河兩岸穿插往返，聲東擊西。通過四次渡河，紅軍巧妙地穿插於國民黨軍重兵集團之間，迷惑了敵人。",
-          significance: "徹底粉碎了蔣介石企圖圍殲紅軍於川黔滇邊境的狂妄計劃，取得了戰略轉移中的主動權，被毛澤東視為其「平生得意之筆」。",
-          figures: [
-            { name: "毛澤東", role: "指揮者", desc: "展現了高超的軍事指揮藝術，靈活機動。" }
-          ],
-          survival: {
-            title: "急行軍與運動戰",
-            content: "為了調動敵人，紅軍必須在山路中頻繁急行軍。「肥的拖瘦，瘦的拖死」，這種高強度的運動戰雖然疲憊，但卻是生存的唯一希望。"
-          },
-          stat: { label: "歷時", value: "3個多月", icon: "info" },
-          quizzes: [
-            { question: "四渡赤水的主要軍事目的是什麼？", options: ["消滅敵人主力", "尋找糧食", "擺脫敵人圍追堵截", "建立根據地"], answer: 2, explanation: "四渡赤水通過高度機動的運動戰，成功跳出了敵人的包圍圈。" },
-            { question: "毛澤東將哪場戰役稱為自己「平生得意之筆」？", options: ["遼瀋戰役", "四渡赤水", "平型關大捷", "百團大戰"], answer: 1, explanation: "因為在極度劣勢下，通過指揮藝術化險為夷，故被稱為得意之筆。" },
-            { question: "四渡赤水發生在長征的哪個階段？", options: ["長征初期", "遵義會議之後", "過草地之後", "會師之後"], answer: 1, explanation: "四渡赤水發生在遵義會議之後，是毛澤東重新指揮後的第一場大仗。" }
-          ],
-          game: {
-            scenario: "【運動戰】部隊在赤水河兩岸來回穿插（四渡）。戰士們雙腳跑爛，開始抱怨「走弓背不走弓弦」、「盡走冤枉路」。林彪也寫信要求換指揮。",
-            options: [
-              { label: "堅持機動，向戰士解釋這是「調動敵人」", foodChange: -15, moraleChange: 15, result: "正確的運動戰！雖然身體極度疲勞，但成功跳出了40萬敵軍的重圍。" },
-              { label: "聽從抱怨，選擇走直線快路", foodChange: 5, moraleChange: -40, result: "走直線正好撞進蔣介石佈置的碉堡線，紅軍面臨滅頂之災。" },
-              { label: "停下來與追兵決一死戰", foodChange: -10, moraleChange: -50, result: "以卵擊石！紅軍此時極度虛弱，陣地戰必敗無疑。" },
-              { label: "更換指揮員，讓林彪指揮", foodChange: 0, moraleChange: -20, result: "軍心動搖，指揮混亂，錯失了穿插的最佳時機。" }
-            ]
-          }
-        },
-        {
-          id: 4,
-          title: "巧渡金沙江",
-          date: "1935年5月",
-          location: "雲南祿勸",
-          coords: { x: 42, y: 64 },
-          description: "紅軍利用7隻小船，在當地船工的幫助下，經過9天9夜，將主力部隊全部渡過金沙江。當國民黨軍隊趕到時，只能望江興嘆。",
-          significance: "紅軍從此跳出了數十萬敵軍的包圍圈，粉碎了敵人圍追堵截的計劃，取得了戰略轉移的決定性勝利。",
-          figures: [
-            { name: "劉伯承", role: "總參謀長", desc: "親自指揮先遣隊奪取皎平渡口。" },
-            { name: "當地船工", role: "無名英雄", desc: "30多名船工日夜不停地擺渡，為紅軍北上立下大功。" }
-          ],
-          survival: {
-            title: "與時間賽跑",
-            content: "渡江完全依賴僅有的幾條小船。為了加快速度，部隊嚴格控制秩序，人歇船不歇。船工們唱著號子，在湍急的江流中往返。"
-          },
-          stat: { label: "渡船數量", value: "僅7隻小船", icon: "info" },
-          quizzes: [
-            { question: "巧渡金沙江標誌著紅軍？", options: ["到達了延安", "跳出了敵人的包圍圈", "結束了長征", "開始了抗日戰爭"], answer: 1, explanation: "渡過金沙江後，紅軍將幾十萬追兵拋在身後，取得了戰略轉移的決定性勝利。" },
-            { question: "紅軍渡過金沙江主要依靠的是？", options: ["架設浮橋", "7隻小船", "游過去", "敵人的軍艦"], answer: 1, explanation: "紅軍控制了皎平渡，依靠找到的7隻小船，晝夜不停地擺渡了9天9夜。" },
-            { question: "巧渡金沙江時，負責奪取渡口的先遣隊指揮是？", options: ["林彪", "彭德懷", "劉伯承", "葉劍英"], answer: 2, explanation: "劉伯承化裝奇襲，智取了皎平渡口。" }
-          ],
-          game: {
-            scenario: "【軍民關係】來到金沙江皎平渡，全軍只有7隻小船。幾萬人過江需要9天9夜，追兵將至。當地船工疲憊不堪，亦有傳言敵軍會殺船工全家。",
-            options: [
-              { label: "嚴格執行紀律，厚待船工，殺豬款待", foodChange: -15, moraleChange: 25, result: "船工被紅軍誠意感動，拼死擺渡，創造了全軍無一損失渡江的奇蹟！" },
-              { label: "強行徵用，用槍逼著船工划船", foodChange: 0, moraleChange: -25, result: "船工消極怠工甚至鑿沉船隻，渡江失敗，部隊背水一戰面臨全殲。" },
-              { label: "砍伐樹木架設浮橋", foodChange: -10, moraleChange: -10, result: "金沙江水流太急，浮橋根本架不起來，浪費了寶貴的兩天時間。" },
-              { label: "丟棄所有馬匹以騰出船位", foodChange: 15, moraleChange: -15, result: "雖然加快了速度，但失去戰馬對後續過雪山草地造成了巨大困難。" }
-            ]
-          }
-        },
-        {
-          id: 5,
-          title: "飛奪瀘定橋",
-          date: "1935年5月",
-          location: "四川瀘定",
-          coords: { x: 42, y: 55 },
-          description: "紅四團戰士在晝夜兼程240里後，22名突擊隊員沿著只剩下鐵鍊的橋面，冒著對岸敵人的機槍掃射，強行突擊，奪取了大橋。",
-          significance: "粉碎了蔣介石藉助大渡河天險，讓紅軍成為「石達開第二」的企圖，打開了北上的通道。",
-          figures: [
-            { name: "22勇士", role: "突擊隊員", desc: "名字多已不可考，他們攀著鐵鍊，背著馬刀，冒死衝鋒。" },
-            { name: "楊成武", role: "紅四團政委", desc: "指揮部隊在24小時內急行軍240里（120公里）趕到橋頭。" }
-          ],
-          survival: {
-            title: "極限急行軍",
-            content: "為了搶在敵人援兵之前到達，紅四團創造了單日行軍120公里的奇蹟。戰士們邊跑邊嚼生米，甚至互相用繩子拉著跑，克服了身體的極限。"
-          },
-          stat: { label: "急行軍速度", value: "一晝夜240里", icon: "info" },
-          quizzes: [
-            { question: "飛奪瀘定橋的突擊隊員有多少人？", options: ["100人", "50人", "22人", "18人"], answer: 2, explanation: "22名勇士組成了突擊隊，攀著鐵索奪下了大橋。" },
-            { question: "為了奪取瀘定橋，紅四團創造了怎樣的行軍紀錄？", options: ["一晝夜120里", "一晝夜240里", "一晝夜80里", "一晝夜300里"], answer: 1, explanation: "紅四團在暴雨中一晝夜奔襲240里（約120公里），按時趕到瀘定橋。" },
-            { question: "蔣介石曾預言紅軍會在瀘定橋重演哪位歷史人物的悲劇？", options: ["項羽", "石達開", "李自成", "洪秀全"], answer: 1, explanation: "太平天國翼王石達開曾在大渡河畔全軍覆沒，蔣介石企圖讓紅軍成為「石達開第二」。" }
-          ],
-          game: {
-            scenario: "【極限挑戰】接到死命令：一晝夜必須急行軍240里奪下瀘定橋！大雨傾盆，山路濕滑，對岸敵軍也在增援。天黑了，對岸出現火光（敵軍）。",
-            options: [
-              { label: "點起火把，假冒國民黨潰軍加速前進", foodChange: -10, moraleChange: 20, result: "兵不厭詐！這招成功迷惑了對岸川軍，紅四團按時到達並奪下大橋！" },
-              { label: "摸黑前進，避免暴露", foodChange: -5, moraleChange: 5, result: "速度太慢，天亮時敵軍增援部隊已炸毀大橋，紅軍被困在大渡河畔。" },
-              { label: "停下休息煮飯，恢復體力", foodChange: 5, moraleChange: -50, result: "延誤戰機！這是致命的錯誤，任務失敗意味著全軍覆沒。" },
-              { label: "拋棄武器減重奔襲", foodChange: -5, moraleChange: -30, result: "雖然跑到了，但沒有重機槍掩護，突擊隊員全部犧牲在鐵索橋上。" }
-            ]
-          }
-        },
-        {
-          id: 6,
-          title: "爬雪山過草地",
-          date: "1935年6月-8月",
-          location: "川西北",
-          coords: { x: 40, y: 45 },
-          description: "紅軍翻越了終年積雪的夾金山，穿越了人跡罕至、氣候惡劣、遍布沼澤的松潘草地。這是長征中自然環境最惡劣、非戰鬥減員最嚴重的階段。",
-          significance: "體現了紅軍戰士極強的意志力和革命樂觀主義精神，是長征精神的集中體現。",
-          figures: [
-            { name: "炊事班長", role: "無名英雄", desc: "在《金色的魚鉤》故事中，老班長照顧病號，自己卻因飢餓犧牲。" }
-          ],
-          survival: {
-            title: "吃皮帶與野菜",
-            content: "糧食斷絕後，戰士們挖野菜、煮皮帶充飢。草地天氣瞬息萬變，許多戰士因為陷入泥沼或體溫過低而在睡夢中再也沒有醒來。"
-          },
-          stat: { label: "主要威脅", value: "飢餓、嚴寒、缺氧", icon: "info" },
-          quizzes: [
-            { question: "紅軍翻越的第一座大雪山是？", options: ["玉龍雪山", "夾金山", "長白山", "崑崙山"], answer: 1, explanation: "夾金山是紅軍長征翻越的第一座大雪山，海拔4000多米。" },
-            { question: "過草地時，紅軍面臨的最大困難不包括？", options: ["遍布沼澤", "糧食短缺", "氣候惡劣", "敵軍大規模圍剿"], answer: 3, explanation: "草地人跡罕至，國民黨軍隊也無法進入，因此主要困難是惡劣的自然環境和飢餓，而非敵軍圍剿。" },
-            { question: "著名的「長征精神」在這一階段主要體現在？", options: ["靈活的戰略戰術", "大無畏的革命樂觀主義", "軍民魚水情", "國際主義精神"], answer: 1, explanation: "面對極端的自然環境，紅軍展現了挑戰極限、不怕犧牲的革命樂觀主義精神。" }
-          ],
-          game: {
-            scenario: "【絕境求生】進入草地第七天，乾糧耗盡。眼前只有無盡的泥沼和不知名的野菜。戰士們開始浮腫、腹瀉，甚至有人提議去搶劫附近的喇嘛廟。",
-            options: [
-              { label: "嚴守紀律，煮皮帶和牛皮鞋充飢", foodChange: 5, moraleChange: 10, result: "雖然難以下嚥，但維護了紅軍紀律，靠著微薄的熱量撐過了最後幾天。" },
-              { label: "嘗試顏色鮮豔的野蘑菇", foodChange: 10, moraleChange: -30, result: "中毒！大量戰士出現幻覺和嘔吐，部隊戰鬥力歸零。" },
-              { label: "殺掉僅存的戰馬分食", foodChange: 25, moraleChange: -10, result: "忍痛殺馬。雖然失去了運輸工具，但這頓肉食挽救了許多瀕死戰士的生命。" },
-              { label: "搶劫喇嘛廟的糧食", foodChange: 40, moraleChange: -50, result: "違反民族政策！雖然吃飽了，但遭到藏族武裝的襲擊，損失比飢餓更慘重。" }
-            ]
-          }
-        },
-        {
-          id: 7,
-          title: "吳起鎮會師",
-          date: "1935年10月",
-          location: "陝北吳起鎮",
-          coords: { x: 55, y: 35 },
-          description: "中央紅軍到達陝北吳起鎮，與陝北紅軍勝利會師。這標誌著紅一方面軍主力長征的勝利結束。",
-          significance: "宣告了國民黨圍追堵截的失敗，為中國革命大本營放在西北舉行了奠基禮，開啟了中國革命的新局面。",
-          figures: [
-            { name: "劉志丹", role: "陝北紅軍領導人", desc: "創建了陝北革命根據地，為中央紅軍提供了落腳點。" },
-            { name: "習仲勳", role: "陝北紅軍領導人", desc: "迎接中央紅軍的到來。" }
-          ],
-          survival: {
-            title: "窯洞與小米",
-            content: "到達陝北後，戰士們住進了窯洞，吃上了小米飯。雖然條件依然艱苦，但相比草地雪山，這裡已經是溫暖的家。"
-          },
-          stat: { label: "總里程", value: "二萬五千里", icon: "info" },
-          quizzes: [
-            { question: "中央紅軍長征的落腳點是哪裡？", options: ["陝北", "西藏", "新疆", "北京"], answer: 0, explanation: "中央紅軍最終在陝北吳起鎮與當地紅軍會師，落腳陝北。" },
-            { question: "與中央紅軍在吳起鎮會師的是哪支部隊？", options: ["紅二方面軍", "紅四方面軍", "陝北紅軍（紅十五軍團）", "新四軍"], answer: 2, explanation: "吳起鎮會師主要是紅一方面軍（中央紅軍）與陝北紅軍的會師。" },
-            { question: "長征勝利結束標誌著中國革命重心轉移到了？", options: ["東北", "西北", "西南", "華南"], answer: 1, explanation: "長征的勝利為中國革命大本營放在西北舉行了奠基禮。" }
-          ],
-          game: {
-            scenario: "【最後一戰】到達吳起鎮，戰士們看到了窯洞！但尾隨的敵軍騎兵（馬家軍）不依不饒，企圖趁紅軍立足未穩發動攻擊。毛澤東提議「切掉這個尾巴」。",
-            options: [
-              { label: "利用地形設伏，打個殲滅戰", foodChange: -10, moraleChange: 50, result: "「切尾巴」戰役大獲全勝！用一場漂亮的勝仗宣告了長征的結束！" },
-              { label: "加速撤入根據地，避戰保全", foodChange: 5, moraleChange: 0, result: "雖然安全了，但帶著敵人的追擊進入根據地，顯得狼狽，且後患無窮。" },
-              { label: "就地舉辦聯歡會慶祝會師", foodChange: 10, moraleChange: -40, result: "大意失荊州！慶祝活動被敵軍騎兵衝散，樂極生悲，損失慘重。" },
-              { label: "請求陝北紅軍代為阻擊", foodChange: 0, moraleChange: -10, result: "雖然劉志丹願意幫忙，但顯示了中央紅軍的怯戰，影響了會師後的威信。" }
-            ]
-          }
-        }
-      ];
+interface Quiz {
+  question: string;
+  options: string[];
+  answer: number;
+  explanation: string;
+}
 
-      // --- 3. 組件: 戰術示意圖 (EventSchematic) ---
-      const EventSchematic = ({ id }) => {
-        const RED = "#b71c1c";
-        const BLUE = "#607d8b";
-        const GREY = "#546e7a";
+interface GameOption {
+  label: string;
+  foodChange: number;
+  moraleChange: number;
+  result: string;
+}
 
-        const renderContent = () => {
-          switch (id) {
-            case 0: // 瑞金
-              return (
-                <React.Fragment>
-                  <text x="50" y="15" textAnchor="middle" fontSize="6" fill={GREY} fontWeight="bold" className="font-serif">國民黨包圍圈</text>
-                  <circle cx="50" cy="50" r="35" fill="none" stroke={GREY} strokeWidth="1" strokeDasharray="4,2" />
-                  <circle cx="50" cy="50" r="3" fill={RED} />
-                  <text x="50" y="58" textAnchor="middle" fontSize="5" fill={RED} fontWeight="bold" className="font-serif">瑞金</text>
-                  <path d="M 45 50 L 25 50" stroke={RED} strokeWidth="2" markerEnd="url(#arrow)" />
-                  <text x="35" y="45" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">突圍</text>
-                </React.Fragment>
-              );
-            case 1: // 湘江
-              return (
-                <React.Fragment>
-                   <path d="M 40 10 Q 45 50 40 90" stroke={BLUE} strokeWidth="8" fill="none" opacity="0.5" />
-                   <text x="35" y="20" fontSize="5" fill="#455a64" writingMode="tb" className="font-serif">湘江</text>
-                   <rect x="30" y="20" width="10" height="10" fill={GREY} opacity="0.5" />
-                   <rect x="30" y="70" width="10" height="10" fill={GREY} opacity="0.5" />
-                   <path d="M 70 50 L 30 50" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
-                   <circle cx="40" cy="50" r="4" fill="#c62828" opacity="0.5" />
-                   <text x="55" y="45" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">突破封鎖</text>
-                </React.Fragment>
-              );
-            case 2: // 遵義
-              return (
-                <React.Fragment>
-                   <rect x="30" y="30" width="40" height="30" rx="2" fill="#8d6e63" />
-                   <text x="50" y="48" textAnchor="middle" fontSize="5" fill="white" fontWeight="bold" className="font-serif">遵義會議</text>
-                   <path d="M 20 80 L 40 60" stroke="#bdbdbd" strokeWidth="2" strokeDasharray="2,2" />
-                   <path d="M 50 25 L 50 10" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
-                   <text x="70" y="15" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">軍事轉折</text>
-                </React.Fragment>
-              );
-            case 3: // 赤水
-              return (
-                <React.Fragment>
-                   <path d="M 20 10 Q 80 30 20 50 Q 80 70 20 90" stroke={BLUE} strokeWidth="6" fill="none" opacity="0.5" />
-                   <path d="M 60 20 Q 10 30 60 40 Q 90 50 40 60 Q 10 70 50 80" stroke={RED} strokeWidth="1.5" fill="none" strokeDasharray="3,1" markerEnd="url(#arrow)" />
-                   <text x="80" y="20" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">四渡赤水</text>
-                   <text x="80" y="26" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">出奇制勝</text>
-                </React.Fragment>
-              );
-            case 4: // 金沙江
-              return (
-                <React.Fragment>
-                   <path d="M 10 40 Q 50 80 90 40" stroke={BLUE} strokeWidth="8" fill="none" opacity="0.5" />
-                   <text x="50" y="70" textAnchor="middle" fontSize="5" fill="#455a64" className="font-serif">金沙江</text>
-                   <circle cx="50" cy="60" r="2" fill="black" />
-                   <text x="50" y="55" textAnchor="middle" fontSize="3" fill="black" className="font-serif">皎平渡</text>
-                   <path d="M 50 85 L 50 65" stroke={RED} strokeWidth="2" />
-                   <path d="M 50 55 L 50 20" stroke={RED} strokeWidth="2" markerEnd="url(#arrow)" />
-                   <text x="70" y="30" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">北上突圍</text>
-                </React.Fragment>
-              );
-            case 5: // 瀘定橋
-              return (
-                <React.Fragment>
-                   <rect x="0" y="0" width="30" height="100" fill="#a1887f" />
-                   <rect x="70" y="0" width="30" height="100" fill="#a1887f" />
-                   <rect x="30" y="0" width="40" height="100" fill={BLUE} opacity="0.7" />
-                   <text x="50" y="90" textAnchor="middle" fontSize="5" fill="white" className="font-serif">大渡河</text>
-                   <line x1="30" y1="50" x2="70" y2="50" stroke="#3e2723" strokeWidth="2" />
-                   <line x1="30" y1="50" x2="70" y2="50" stroke="black" strokeWidth="0.5" strokeDasharray="1,1" transform="translate(0, -2)" />
-                   <path d="M 20 50 L 80 50" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
-                   <text x="50" y="40" textAnchor="middle" fontSize="4" fill={RED} fontWeight="bold" className="font-serif">強渡天險</text>
-                </React.Fragment>
-              );
-            case 6: // 雪山
-              return (
-                <React.Fragment>
-                   <path d="M 10 80 L 30 40 L 50 80 L 70 30 L 90 80" fill="none" stroke={GREY} strokeWidth="2" />
-                   <path d="M 30 40 L 35 50 M 70 30 L 75 40" stroke="white" strokeWidth="4" strokeLinecap="round" />
-                   <path d="M 10 90 Q 30 60 50 90 Q 70 50 90 20" stroke={RED} strokeWidth="1.5" fill="none" strokeDasharray="2,1" markerEnd="url(#arrow)" />
-                   <text x="50" y="20" textAnchor="middle" fontSize="4" fill={GREY} className="font-serif">雪山草地</text>
-                </React.Fragment>
-              );
-            case 7: // 吳起鎮
-              return (
-                <React.Fragment>
-                   <path d="M 30 30 Q 70 20 80 60 Q 40 80 30 30" fill="#fff59d" stroke="#fbc02d" />
-                   <text x="55" y="50" textAnchor="middle" fontSize="5" fill="#f57f17" className="font-serif">陝北根據地</text>
-                   <path d="M 50 90 L 55 60" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
-                   <path d="M 90 50 L 70 50" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
-                   <text x="60" y="58" textAnchor="middle" fontSize="10" fill="red">★</text>
-                   <text x="80" y="80" textAnchor="middle" fontSize="5" fill={RED} fontWeight="bold" className="font-serif">勝利會師</text>
-                </React.Fragment>
-              );
-            default: return null;
-          }
-        };
+interface SurvivalChallenge {
+  scenario: string;
+  options: GameOption[];
+}
 
+interface Milestone {
+  id: number;
+  title: string;
+  date: string;
+  location: string;
+  coords: [number, number];
+  description: string;
+  significance: string;
+  figures: HistoricalFigure[];
+  survival: {
+    title: string;
+    content: string;
+    poem?: {
+      text: string;
+      author?: string;
+      source?: string;
+    };
+  };
+  stat: {
+    label: string;
+    value: string;
+    icon: 'users' | 'info';
+  };
+  quizzes: Quiz[];
+  game: SurvivalChallenge;
+}
+
+// --- CONSTANTS ---
+
+const MILESTONES: Milestone[] = [
+  {
+    id: 0,
+    title: "瑞金出發",
+    date: "1934年10月",
+    location: "江西瑞金",
+    coords: [25.8846, 116.0275],
+    description: "由於第五次反「圍剿」失敗，中央紅軍（紅一方面軍）主力開始進行戰略轉移。這是一次被逼無奈的撤退，初期攜帶了大量輜重（壇壇罐罐），行軍速度極慢。",
+    significance: "紅軍被迫撤離中央蘇區，開始了艱苦卓絕的戰略大轉移。這是長征的起點。",
+    figures: [
+      { name: "博古", role: "中共中央總負責人", desc: "時任中共中央總負責人，推行「左」傾冒險主義，導致反圍剿失敗，長征初期仍堅持錯誤指揮。" },
+      { name: "李德", role: "共產國際軍事顧問", desc: "德國人，掌握紅軍最高軍事指揮權。他不了解中國實際情況，指揮機械，導致紅軍遭受重大損失。" },
+      { name: "周恩來", role: "紅軍總政委", desc: "在極其困難的情況下負責具體軍事組織工作，努力減少錯誤指揮帶來的損失。" }
+    ],
+    survival: {
+      title: "搬家式行軍",
+      content: "出發初期，紅軍實行「大搬家」，攜帶了印刷機、X光機甚至桌椅板凳。這些笨重的輜重嚴重拖慢了行軍速度，讓紅軍在突破封鎖線時付出了極大代價。",
+      poem: {
+        text: "十月里來秋風涼，中央紅軍遠征忙。星夜渡過于都河，古陂新田打勝仗。",
+        source: "江西民歌",
+        author: "佚名"
+      }
+    },
+    stat: { label: "出發人數", value: "8.6萬餘人", icon: "users" },
+    quizzes: [
+      { question: "長征的出發點主要是在哪個省份？", options: ["陝西", "江西", "貴州", "四川"], answer: 1, explanation: "中央紅軍是從江西瑞金（中央蘇區）出發的。" },
+      { question: "導致紅軍被迫進行戰略轉移的直接原因是？", options: ["第四次反圍剿失敗", "第五次反圍剿失敗", "北上抗日", "擴大根據地"], answer: 1, explanation: "第五次反圍剿失敗後，中央紅軍無法在中央蘇區立足，被迫轉移。" },
+      { question: "長征初期，紅軍行軍速度緩慢的主要原因是？", options: ["攜帶大量輜重", "道路被破壞", "等待援軍", "天氣惡劣"], answer: 0, explanation: "「大搬家」式的行軍攜帶了過多笨重物資，嚴重拖累了部隊速度。" }
+    ],
+    game: {
+      scenario: "【歷史抉擇】大撤退開始，後勤部將造幣機、X光機甚至笨重的桌椅都打包帶上了，隊伍變成了「甬道式」搬家，日行僅幾十里。敵軍碉堡群就在前方，你作為指揮員建議：",
+      options: [
+        { label: "堅決丟棄重型輜重，輕裝突圍", foodChange: -5, moraleChange: 10, result: "歷史正確選擇！雖然損失了設備，但部隊機動性大增，減少了突破封鎖線時的傷亡。" },
+        { label: "全數攜帶，這些是革命的家當", foodChange: -20, moraleChange: -15, result: "錯誤的「大搬家」！部隊臃腫不堪，在湘江戰役中成為敵機轟炸的活靶子，傷亡慘重。" },
+        { label: "徵用民夫協助搬運", foodChange: -15, moraleChange: -10, result: "增加了糧食消耗，且民夫在戰亂中四散逃跑，造成了更大的混亂。" },
+        { label: "就地掩埋，留下標記待日後取回", foodChange: -10, moraleChange: 0, result: "折衷方案。雖然減輕了負擔，但掩埋工作耗費了寶貴的突圍時間。" }
+      ]
+    }
+  },
+  {
+    id: 1,
+    title: "血戰湘江",
+    date: "1934年11月",
+    location: "廣西全州",
+    coords: [25.9286, 111.0720],
+    description: "長征中最慘烈的一戰。紅軍突破國民黨軍第四道封鎖線，但由於隊伍臃腫和指揮失誤，付出了極其慘重的代價。湘江水被紅軍戰士的鮮血染紅。",
+    significance: "雖然突破了封鎖，但慘重的犧牲（損兵折將過半）引發了廣大指戰員對軍事指揮錯誤的強烈不滿，為遵義會議的召開埋下伏筆。",
+    figures: [
+      { name: "陳樹湘", role: "紅34師師長", desc: "率領全師擔任後衛，在湘江東岸阻擊敵人，彈盡糧絕後腹部中彈，斷腸明志，壯烈犧牲。" },
+      { name: "易盪平", role: "紅1團政委", desc: "在腳山鋪戰鬥中身負重傷，為不當俘虜，奪過警衛員的槍自盡殉國。" },
+      { name: "林彪", role: "紅一軍團軍團長", desc: "指揮紅一軍團在湘江渡口死守，掩護中央縱隊過江。" }
+    ],
+    survival: {
+      title: "三年不飲湘江水",
+      content: "戰役過後，當地百姓流傳著「三年不飲湘江水，十年不食湘江魚」的說法，可見戰況之慘烈，屍橫遍野。",
+      poem: {
+        text: "英雄血染湘江渡，江水滔滔泣鬼神。",
+        source: "後人詩作",
+        author: "佚名"
+      }
+    },
+    stat: { label: "人員銳減", value: "8.6萬 → 3萬", icon: "users" },
+    quizzes: [
+      { question: "湘江戰役後，紅軍人數發生了什麼變化？", options: ["增加了一倍", "基本持平", "銳減過半", "全部犧牲"], answer: 2, explanation: "湘江戰役是長征中最慘烈的戰役，紅軍人數由8.6萬銳減至3萬餘人。" },
+      { question: "湘江戰役中，負責後衛任務最終全軍覆沒的是哪支部隊？", options: ["紅一軍團", "紅三軍團", "紅34師", "紅五軍團"], answer: 2, explanation: "紅34師作為「絕命後衛師」，為掩護主力過江，最終全軍覆沒。" },
+      { question: "湘江戰役的慘敗直接導致了後來哪次會議的召開？", options: ["古田會議", "遵義會議", "瓦窯堡會議", "洛川會議"], answer: 1, explanation: "慘重的犧牲引發了對錯誤指揮的不滿，直接推動了遵義會議的召開。" }
+    ],
+    game: {
+      scenario: "【生死關頭】搶渡湘江！兩側敵軍已形成口袋陣，後衛紅34師被截斷在江東。江面敵機俯衝轟炸，江水已染紅。主力部隊還有大量人員未過江。",
+      options: [
+        { label: "命令紅34師死守陣地，掩護軍委過江", foodChange: -5, moraleChange: -25, result: "壯烈的犧牲！紅34師全軍覆沒，主力倖存但士氣跌至谷底。" },
+        { label: "主力部隊回頭接應後衛", foodChange: -30, moraleChange: 5, result: "軍事自殺！主力重回包圍圈，導致紅軍面臨全軍覆沒的危險。" },
+        { label: "化整為零，分散突圍", foodChange: -15, moraleChange: -20, result: "部隊建制被打散，大量非戰鬥減員，紅軍可能就此潰散。" },
+        { label: "拋棄所有文件與機器，強行涉水", foodChange: -10, moraleChange: -5, result: "丟棄了最後的包袱，雖然損失物資，但保住了剩餘的有生力量。" }
+      ]
+    }
+  },
+  {
+    id: 2,
+    title: "遵義會議",
+    date: "1935年1月",
+    location: "貴州遵義",
+    coords: [27.7031, 106.9334],
+    description: "中共中央在遵義召開政治局擴大會議。會議集中全力解決了當時具有決定意義的軍事和組織問題，糾正了「左」傾教條主義錯誤。",
+    significance: "確立了毛澤東在黨和紅軍中的領導地位，在極其危急的關頭挽救了黨，挽救了紅軍，是黨的歷史上一個生死攸關的轉折點。",
+    figures: [
+      { name: "毛澤東", role: "政治局常委", desc: "在會議上精闢分析了第五次反圍剿失敗的原因，被選為政治局常委，進入核心決策層。" },
+      { name: "王稼祥", role: "紅軍總政治部主任", desc: "在會議上投出了關鍵一票，旗幟鮮明地支持毛澤東的主張，批評李德的錯誤指揮。" },
+      { name: "張聞天", role: "政治局常委", desc: "在會議上作了反對「左」傾軍事錯誤的報告（反報告），接替博古負總責。" }
+    ],
+    survival: {
+      title: "難得的休整",
+      content: "佔領遵義後，紅軍獲得了長征以來難得的12天休整時間。戰士們補充了給養，更重要的是，精神面貌煥然一新。",
+      poem: {
+        text: "雄關漫道真如鐵，而今邁步從頭越。",
+        source: "《憶秦娥·婁山關》",
+        author: "毛澤東"
+      }
+    },
+    stat: { label: "會議時長", value: "3天", icon: "info" },
+    quizzes: [
+      { question: "遵義會議被認為是中國共產黨歷史上的什麼？", options: ["生死攸關的轉折點", "長征的結束點", "建黨的開始", "國共合作的起點"], answer: 0, explanation: "遵義會議挽救了黨和紅軍，是歷史上生死攸關的轉折點。" },
+      { question: "遵義會議主要解決了什麼問題？", options: ["政治和思想問題", "軍事和組織問題", "經濟和文化問題", "外交和統一戰線問題"], answer: 1, explanation: "會議集中全力解決了當時最緊迫的軍事問題和組織問題（領導權）。" },
+      { question: "遵義會議事實上確立了誰在黨和紅軍中的領導地位？", options: ["周恩來", "朱德", "毛澤東", "王稼祥"], answer: 2, explanation: "會議增選毛澤東為政治局常委，事實上確立了他的領導地位。" }
+    ],
+    game: {
+      scenario: "【路線之爭】攻占遵義後，黨內對「李德式」的機械指揮怨聲載道。是否召開政治局擴大會議進行徹底檢討？還是繼續聽從共產國際顧問的指揮？",
+      options: [
+        { label: "支持毛澤東，批判單純防禦路線", foodChange: 5, moraleChange: 40, result: "歷史轉折點！確立了正確的軍事路線，紅軍重獲生機，士氣空前高漲！" },
+        { label: "維護權威，繼續聽從李德指揮", foodChange: 0, moraleChange: -30, result: "錯誤路線繼續！部隊將繼續在那條通往失敗的道路上撞得頭破血流。" },
+        { label: "專注於補充糧草，不談政治", foodChange: 20, moraleChange: -10, result: "肚子飽了，但腦袋依然糊塗。之後的戰鬥依然會因為錯誤指揮而失敗。" },
+        { label: "提出分兵作戰以分散風險", foodChange: -10, moraleChange: -20, result: "兵力分散將被國民黨各個擊破，這是嚴重的軍事冒險。" }
+      ]
+    }
+  },
+  {
+    id: 3,
+    title: "四渡赤水",
+    date: "1935年1月-3月",
+    location: "川黔邊界 (赤水)",
+    coords: [28.5900, 105.6972],
+    description: "在毛澤東指揮下，紅軍在赤水河兩岸穿插往返，聲東擊西。通過四次渡河，紅軍巧妙地穿插於國民黨軍重兵集團之間，迷惑了敵人。",
+    significance: "徹底粉碎了蔣介石企圖圍殲紅軍於川黔滇邊境的狂妄計劃，取得了戰略轉移中的主動權，被毛澤東視為其「平生得意之筆」。",
+    figures: [
+      { name: "毛澤東", role: "指揮者", desc: "展現了高超的軍事指揮藝術，指揮紅軍在幾十萬敵軍中穿插自如。" },
+      { name: "朱德", role: "紅軍總司令", desc: "與毛澤東緊密配合，發布作戰命令，激勵全軍將士。" },
+      { name: "劉伯承", role: "總參謀長", desc: "協助制定作戰計劃，親臨前線指揮部分戰鬥。" }
+    ],
+    survival: {
+      title: "急行軍與運動戰",
+      content: "為了調動敵人，紅軍必須在山路中頻繁急行軍。「肥的拖瘦，瘦的拖死」，這種高強度的運動戰雖然疲憊，但卻是生存的唯一希望。",
+      poem: {
+        text: "戰士雙腳走天下，四渡赤水出奇兵。",
+        source: "《長征組歌》",
+        author: "肖華"
+      }
+    },
+    stat: { label: "歷時", value: "3個多月", icon: "info" },
+    quizzes: [
+      { question: "四渡赤水的主要軍事目的是什麼？", options: ["消滅敵人主力", "尋找糧食", "擺脫敵人圍追堵截", "建立根據地"], answer: 2, explanation: "四渡赤水通過高度機動的運動戰，成功跳出了敵人的包圍圈。" },
+      { question: "毛澤東將哪場戰役稱為自己「平生得意之筆」？", options: ["遼瀋戰役", "四渡赤水", "平型關大捷", "百團大戰"], answer: 1, explanation: "因為在極度劣勢下，通過指揮藝術化險為夷，故被稱為得意之筆。" },
+      { question: "四渡赤水發生在長征的哪個階段？", options: ["長征初期", "遵義會議之後", "過草地之後", "會師之後"], answer: 1, explanation: "四渡赤水發生在遵義會議之後，是毛澤東重新指揮後的第一場大仗。" }
+    ],
+    game: {
+      scenario: "【運動戰】部隊在赤水河兩岸來回穿插（四渡）。戰士們雙腳跑爛，開始抱怨「走弓背不走弓弦」、「盡走冤枉路」。林彪也寫信要求換指揮。",
+      options: [
+        { label: "堅持機動，向戰士解釋這是「調動敵人」", foodChange: -15, moraleChange: 15, result: "正確的運動戰！雖然身體極度疲勞，但成功跳出了40萬敵軍的重圍。" },
+        { label: "聽從抱怨，選擇走直線快路", foodChange: 5, moraleChange: -40, result: "走直線正好撞進蔣介石佈置的碉堡線，紅軍面臨滅頂之災。" },
+        { label: "停下休息煮飯，恢復體力", foodChange: -10, moraleChange: -50, result: "以卵擊石！紅軍此時極度虛弱，陣地戰必敗無疑。" },
+        { label: "更換指揮員，讓林彪指揮", foodChange: 0, moraleChange: -20, result: "軍心動搖，指揮混亂，錯失了穿插的最佳時機。" }
+      ]
+    }
+  },
+  {
+    id: 4,
+    title: "巧渡金沙江",
+    date: "1935年5月",
+    location: "雲南祿勸 (皎平渡)",
+    coords: [25.5511, 102.4667],
+    description: "紅軍利用7隻小船，在當地船工的幫助下，經過9天9夜，將主力部隊全部渡過金沙江。當國民黨軍隊趕到時，只能望江興嘆。",
+    significance: "紅軍從此跳出了數十萬敵軍的包圍圈，粉碎了敵人圍追堵截的計劃，取得了戰略轉移的決定性勝利。",
+    figures: [
+      { name: "劉伯承", role: "總參謀長", desc: "親自率領幹部團，化裝成國民黨軍，奇襲奪取了皎平渡口。" },
+      { name: "張思德", role: "紅軍戰士", desc: "在長征中總是承擔最繁重的任務，後來在陝北燒炭犧牲，毛澤東為他寫下《為人民服務》。" },
+      { name: "張朝壽", role: "當地船工", desc: "代表了37名無名船工，他們不顧疲勞，日夜擺渡，是紅軍渡江的大功臣。" }
+    ],
+    survival: {
+      title: "與時間賽跑",
+      content: "渡江完全依賴僅有的幾條小船。為了加快速度，部隊嚴格控制秩序，人歇船不歇。船工們唱著號子，在湍急的江流中往返。",
+      poem: {
+        text: "金沙水拍雲崖暖，大渡橋橫鐵索寒。",
+        source: "《七律·長征》",
+        author: "毛澤東"
+      }
+    },
+    stat: { label: "渡船數量", value: "僅7隻小船", icon: "info" },
+    quizzes: [
+      { question: "巧渡金沙江標誌著紅軍？", options: ["到達了延安", "跳出了敵人的包圍圈", "結束了長征", "開始了抗日戰爭"], answer: 1, explanation: "渡過金沙江後，紅軍將幾十萬追兵拋在身後，取得了戰略轉移的決定性勝利。" },
+      { question: "紅軍渡過金沙江主要依靠的是？", options: ["架設浮橋", "7隻小船", "游過去", "敵人的軍艦"], answer: 1, explanation: "紅軍控制了皎平渡，依靠找到的7隻小船，晝夜不停地擺渡了9天9夜。" },
+      { question: "巧渡金沙江時，負責奪取渡口的先遣隊指揮是？", options: ["林彪", "彭德懷", "劉伯承", "葉劍英"], answer: 2, explanation: "劉伯承化裝奇襲，智取了皎平渡口。" }
+    ],
+    game: {
+      scenario: "【軍民關係】來到金沙江皎平渡，全軍只有7隻小船。幾萬人過江需要9天9夜，追兵將至。當地船工疲憊不堪，亦有傳言敵軍會殺船工全家。",
+      options: [
+        { label: "嚴格執行紀律，厚待船工，殺豬款待", foodChange: -15, moraleChange: 25, result: "船工被紅軍誠意感動，拼死擺渡，創造了全軍無一損失渡江的奇蹟！" },
+        { label: "強行徵用，用槍逼著船工划船", foodChange: 0, moraleChange: -25, result: "船工消極怠工甚至鑿沉船隻，渡江失敗，部隊背水一戰面臨全殲。" },
+        { label: "砍伐樹木架設浮橋", foodChange: -10, moraleChange: -10, result: "金沙江水流太急，浮橋根本架不起來，浪費了寶貴的兩天時間。" },
+        { label: "丟棄所有馬匹以騰出船位", foodChange: 15, moraleChange: -15, result: "雖然加快了速度，但失去戰馬對後續過雪山草地造成了巨大困難。" }
+      ]
+    }
+  },
+  {
+    id: 5,
+    title: "飛奪瀘定橋",
+    date: "1935年5月",
+    location: "四川瀘定",
+    coords: [29.9147, 102.2317],
+    description: "紅四團戰士在晝夜兼程240里後，22名突擊隊員沿著只剩下鐵鍊的橋面，冒著對岸敵人的機槍掃射，強行突擊，奪取了大橋。",
+    significance: "粉碎了蔣介石藉助大渡河天險，讓紅軍成為「石達開第二」的企圖，打開了北上的通道。",
+    figures: [
+      { name: "楊成武", role: "紅四團政委", desc: "指揮紅四團在24小時內急行軍240里，創造了陸軍行軍史上的奇蹟，按時到達瀘定橋。" },
+      { name: "王開湘", role: "紅四團團長", desc: "與楊成武共同指揮奪橋戰鬥，選拔了22名勇士組成突擊隊。" },
+      { name: "廖大珠", role: "突擊隊長", desc: "紅四團二連連長，率領22名勇士攀著鐵索，冒著槍林彈雨衝向對岸。" }
+    ],
+    survival: {
+      title: "極限急行軍",
+      content: "為了搶在敵人援兵之前到達，紅四團創造了單日行軍120公里的奇蹟。戰士們邊跑邊嚼生米，甚至互相用繩子拉著跑，克服了身體的極限。",
+      poem: {
+        text: "大渡橋橫鐵索寒。",
+        source: "《七律·長征》",
+        author: "毛澤東"
+      }
+    },
+    stat: { label: "急行軍速度", value: "一晝夜240里", icon: "info" },
+    quizzes: [
+      { question: "飛奪瀘定橋的突擊隊員有多少人？", options: ["100人", "50人", "22人", "18人"], answer: 2, explanation: "22名勇士組成了突擊隊，攀著鐵索奪下了大橋。" },
+      { question: "為了奪取瀘定橋，紅四團創造了怎樣的行軍紀錄？", options: ["一晝夜120里", "一晝夜240里", "一晝夜80里", "一晝夜300里"], answer: 1, explanation: "紅四團在暴雨中一晝夜奔襲240里（約120公里），按時趕到瀘定橋。" },
+      { question: "蔣介石曾預言紅軍會在瀘定橋重演哪位歷史人物的悲劇？", options: ["項羽", "石達開", "李自成", "洪秀全"], answer: 1, explanation: "太平天國翼王石達開曾在大渡河畔全軍覆沒，蔣介石企圖讓紅軍成為「石達開第二」。" }
+    ],
+    game: {
+      scenario: "【極限挑戰】接到死命令：一晝夜必須急行軍240里奪下瀘定橋！大雨傾盆，山路濕滑，對岸敵軍也在增援。天黑了，對岸出現火光（敵軍）。",
+      options: [
+        { label: "點起火把，假冒國民黨潰軍加速前進", foodChange: -10, moraleChange: 20, result: "兵不厭詐！這招成功迷惑了對岸川軍，紅四團按時到達並奪下大橋！" },
+        { label: "摸黑前進，避免暴露", foodChange: -5, moraleChange: 5, result: "速度太慢，天亮時敵軍增援部隊已炸毀大橋，紅軍被困在大渡河畔。" },
+        { label: "停下休息煮飯，恢復體力", foodChange: 5, moraleChange: -50, result: "延誤戰機！這是致命的錯誤，任務失敗意味著全軍覆沒。" },
+        { label: "拋棄武器減重奔襲", foodChange: -5, moraleChange: -30, result: "雖然跑到了，但沒有重機槍掩護，突擊隊員全部犧牲在鐵索橋上。" }
+      ]
+    }
+  },
+  {
+    id: 6,
+    title: "爬雪山過草地",
+    date: "1935年6月-8月",
+    location: "川西北 (夾金山/松潘)",
+    coords: [31.9821, 103.5866],
+    description: "紅軍翻越了終年積雪的夾金山，穿越了人跡罕至、氣候惡劣、遍布沼澤的松潘草地。這是長征中自然環境最惡劣、非戰鬥減員最嚴重的階段。",
+    significance: "體現了紅軍戰士極強的意志力和革命樂觀主義精神，是長征精神的集中體現。",
+    figures: [
+      { name: "老班長", role: "炊事班長", desc: "課文《金色的魚鉤》原型。在草地中照顧病號，把食物讓給戰士，自己因飢餓犧牲。" },
+      { name: "賀子珍", role: "紅軍女戰士", desc: "在長征途中為了掩護傷員，身體多處被敵機彈片擊中，忍痛走完長征。" },
+      { name: "徐特立", role: "教育家", desc: "年近六旬的老教育家，雖有馬匹但常讓給傷病員騎，自己拄著棍子步行。" }
+    ],
+    survival: {
+      title: "吃皮帶與野菜",
+      content: "糧食斷絕後，戰士們挖野菜、煮皮帶充飢。草地天氣瞬息萬變，許多戰士因為陷入泥沼或體溫過低而在睡夢中再也沒有醒來。",
+      poem: {
+        text: "更喜岷山千里雪，三軍過後盡開顏。",
+        source: "《七律·長征》",
+        author: "毛澤東"
+      }
+    },
+    stat: { label: "主要威脅", value: "飢餓、嚴寒、缺氧", icon: "info" },
+    quizzes: [
+      { question: "紅軍翻越的第一座大雪山是？", options: ["玉龍雪山", "夾金山", "長白山", "崑崙山"], answer: 1, explanation: "夾金山是紅軍長征翻越的第一座大雪山，海拔4000多米。" },
+      { question: "過草地時，紅軍面臨的最大困難不包括？", options: ["遍布沼澤", "糧食短缺", "氣候惡劣", "敵軍大規模圍剿"], answer: 3, explanation: "草地人跡罕至，國民黨軍隊也無法進入，因此主要困難是惡劣的自然環境和飢餓，而非敵軍圍剿。" },
+      { question: "著名的「長征精神」在這一階段主要體現在？", options: ["靈活的戰略戰術", "大無畏的革命樂觀主義", "軍民魚水情", "國際主義精神"], answer: 1, explanation: "面對極端的自然環境，紅軍展現了挑戰極限、不怕犧牲的革命樂觀主義精神。" }
+    ],
+    game: {
+      scenario: "【絕境求生】進入草地第七天，乾糧耗盡。眼前只有無盡的泥沼和不知名的野菜。戰士們開始浮腫、腹瀉，甚至有人提議去搶劫附近的喇嘛廟。",
+      options: [
+        { label: "嚴守紀律，煮皮帶和牛皮鞋充飢", foodChange: 5, moraleChange: 10, result: "雖然難以下嚥，但維護了紅軍紀律，靠著微薄的熱量撐過了最後幾天。" },
+        { label: "嘗試顏色鮮豔的野蘑菇", foodChange: 10, moraleChange: -30, result: "中毒！大量戰士出現幻覺和嘔吐，部隊戰鬥力歸零。" },
+        { label: "殺掉僅存的戰馬分食", foodChange: 25, moraleChange: -10, result: "忍痛殺馬。雖然失去了運輸工具，但這頓肉食挽救了許多瀕死戰士的生命。" },
+        { label: "搶劫喇嘛廟的糧食", foodChange: 40, moraleChange: -50, result: "違反民族政策！雖然吃飽了，但遭到藏族武裝的襲擊，損失比飢餓更慘重。" }
+      ]
+    }
+  },
+  {
+    id: 7,
+    title: "吳起鎮會師",
+    date: "1935年10月",
+    location: "陝北吳起鎮",
+    coords: [36.9274, 108.1762],
+    description: "中央紅軍到達陝北吳起鎮，與陝北紅軍勝利會師。這標誌著紅一方面軍主力長征的勝利結束。",
+    significance: "宣告了國民黨圍追堵截的失敗，為中國革命大本營放在西北舉行了奠基禮，開啟了中國革命的新局面。",
+    figures: [
+      { name: "劉志丹", role: "陝北紅軍領導人", desc: "創建了陝北革命根據地，為中央紅軍提供了落腳點，熱情迎接中央紅軍。" },
+      { name: "習仲勳", role: "陝北紅軍領導人", desc: "時任陝甘邊蘇維埃政府主席，積極籌措物資，支援長征到達的中央紅軍。" },
+      { name: "彭德懷", role: "紅軍前敵總指揮", desc: "指揮了著名的「切尾巴」戰鬥，擊潰了追擊的敵軍騎兵，保證了會師的安全。" }
+    ],
+    survival: {
+      title: "窯洞與小米",
+      content: "到達陝北後，戰士們住進了窯洞，吃上了小米飯。雖然條件依然艱苦，但相比草地雪山，這裡已經是溫暖的家。",
+      poem: {
+        text: "山高路遠坑深，大軍縱橫馳奔。誰敢橫刀立馬？唯我彭大將軍！",
+        source: "《六言詩·給彭德懷同志》",
+        author: "毛澤東"
+      }
+    },
+    stat: { label: "總里程", value: "二萬五千里", icon: "info" },
+    quizzes: [
+      { question: "中央紅軍長征的落腳點是哪裡？", options: ["陝北", "西藏", "新疆", "北京"], answer: 0, explanation: "中央紅軍最終在陝北吳起鎮與當地紅軍會師，落腳陝北。" },
+      { question: "與中央紅軍在吳起鎮會師的是哪支部隊？", options: ["紅二方面軍", "紅四方面軍", "陝北紅軍（紅十五軍團）", "新四軍"], answer: 2, explanation: "吳起鎮會師主要是紅一方面軍（中央紅軍）與陝北紅軍的會師。" },
+      { question: "長征勝利結束標誌著中國革命重心轉移到了？", options: ["東北", "西北", "西南", "華南"], answer: 1, explanation: "長征的勝利為中國革命大本營放在西北舉行了奠基禮。" }
+    ],
+    game: {
+      scenario: "【最後一戰】到達吳起鎮，戰士們看到了窯洞！但尾隨的敵軍騎兵（馬家軍）不依不饒，企圖趁紅軍立足未穩發動攻擊。毛澤東提議「切掉這個尾巴」。",
+      options: [
+        { label: "利用地形設伏，打個殲滅戰", foodChange: -10, moraleChange: 50, result: "「切尾巴」戰役大獲全勝！用一場漂亮的勝仗宣告了長征的結束！" },
+        { label: "加速撤入根據地，避戰保全", foodChange: 5, moraleChange: 0, result: "雖然安全了，但帶著敵人的追擊進入根據地，顯得狼狽，且後患無窮。" },
+        { label: "就地舉辦聯歡會慶祝會師", foodChange: 10, moraleChange: -40, result: "大意失荊州！慶祝活動被敵軍騎兵衝散，樂極生悲，損失慘重。" },
+        { label: "請求陝北紅軍代為阻擊", foodChange: 0, moraleChange: -10, result: "雖然劉志丹願意幫忙，但顯示了中央紅軍的怯戰，影響了會師後的威信。" }
+      ]
+    }
+  }
+];
+
+// --- COMPONENTS ---
+
+// EventSchematic.tsx
+const EventSchematic = ({ id }) => {
+  const RED = "#b71c1c";
+  const BLUE = "#607d8b";
+  const GREY = "#546e7a";
+
+  const renderContent = () => {
+    switch (id) {
+      case 0: // 瑞金
         return (
-          <div className="w-full h-32 bg-[#f5f5f5] rounded-lg border border-[#d7ccc8] mb-4 overflow-hidden relative shadow-inner">
-            <div className="absolute top-1 left-2 text-[10px] text-[#a1887f] font-bold uppercase tracking-widest font-serif">戰術示意圖</div>
-            <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-              <defs>
-                <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M0,0 L0,6 L6,3 z" fill="#b71c1c" />
-                </marker>
-              </defs>
-              {renderContent()}
-            </svg>
-          </div>
+          <React.Fragment>
+            <text x="50" y="10" textAnchor="middle" fontSize="5" fill={GREY} fontWeight="bold" className="font-serif tracking-widest">敵軍包圍圈</text>
+            <circle cx="50" cy="50" r="35" fill="none" stroke={GREY} strokeWidth="1" strokeDasharray="4,2" />
+            <path d="M 50 15 L 50 25 M 85 50 L 75 50 M 50 85 L 50 75 M 15 50 L 25 50" stroke={GREY} strokeWidth="2" markerEnd="url(#arrow-grey)" />
+            <circle cx="50" cy="50" r="4" fill={RED} />
+            <text x="50" y="58" textAnchor="middle" fontSize="5" fill={RED} fontWeight="bold" className="font-serif">瑞金</text>
+            <path d="M 45 50 L 15 50" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
+            <text x="30" y="45" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">突圍西進</text>
+          </React.Fragment>
         );
-      };
-
-      // --- 4. 組件: 測驗模態框 (QuizModal) ---
-      const QuizModal = ({ quizzes, isOpen, onClose }) => {
-        const [currentQIndex, setCurrentQIndex] = useState(0);
-        const [selected, setSelected] = useState(null);
-        const [showResult, setShowResult] = useState(false);
-        const [score, setScore] = useState(0);
-        const [isFinished, setIsFinished] = useState(false);
-
-        useEffect(() => { if (isOpen) resetQuiz(); }, [isOpen, quizzes]);
-
-        const resetQuiz = () => {
-          setCurrentQIndex(0);
-          setSelected(null);
-          setShowResult(false);
-          setScore(0);
-          setIsFinished(false);
-        };
-
-        if (!isOpen || !quizzes || quizzes.length === 0) return null;
-        const currentQuiz = quizzes[currentQIndex];
-
-        const handleCheck = () => {
-          if (selected !== null) {
-            setShowResult(true);
-            if (selected === currentQuiz.answer) setScore(prev => prev + 1);
-          }
-        };
-
-        const handleNext = () => {
-          if (currentQIndex < quizzes.length - 1) {
-            setCurrentQIndex(prev => prev + 1);
-            setSelected(null);
-            setShowResult(false);
-          } else {
-            setIsFinished(true);
-          }
-        };
-
+      case 1: // 湘江
         return (
-          <div className="fixed inset-0 bg-[#263238]/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity animate-in fade-in duration-200">
-            <div className="bg-[#fff8e1] rounded-xl shadow-2xl max-w-lg w-full p-6 border-4 border-[#ff6f00] animate-fade-in-zoom relative overflow-hidden">
-              <div className="flex justify-between items-center mb-6 border-b border-[#ffe082] pb-4">
-                <h3 className="text-xl font-bold text-[#e65100] flex items-center gap-2 font-serif"><HelpCircle size={24}/> 隨堂知識問答</h3>
-                <button onClick={onClose} className="text-[#a1887f] hover:text-[#5d4037] transition-colors"><X size={24}/></button>
+          <React.Fragment>
+             {/* River */}
+             <path d="M 45 5 Q 55 50 45 95" stroke={BLUE} strokeWidth="12" fill="none" opacity="0.3" />
+             <path d="M 45 5 Q 55 50 45 95" stroke="white" strokeWidth="1" fill="none" strokeDasharray="5,5" opacity="0.5" />
+             <text x="40" y="20" fontSize="5" fill="#455a64" writingMode="tb" className="font-serif font-bold">湘江</text>
+             
+             {/* Enemy Blocks */}
+             <rect x="35" y="20" width="8" height="8" fill={GREY} opacity="0.8" />
+             <rect x="35" y="70" width="8" height="8" fill={GREY} opacity="0.8" />
+             <path d="M 39 28 L 39 40" stroke={GREY} strokeWidth="1" markerEnd="url(#arrow-grey)" />
+             <path d="M 39 70 L 39 58" stroke={GREY} strokeWidth="1" markerEnd="url(#arrow-grey)" />
+
+             {/* Red Army Crossing */}
+             <path d="M 80 50 L 20 50" stroke={RED} strokeWidth="4" markerEnd="url(#arrow)" />
+             <circle cx="50" cy="50" r="6" fill="#c62828" opacity="0.6">
+                <animate attributeName="r" values="6;8;6" dur="2s" repeatCount="indefinite" />
+             </circle>
+             <text x="50" y="45" textAnchor="middle" fontSize="4" fill={RED} fontWeight="bold" className="font-serif">血戰突破</text>
+             <text x="80" y="55" textAnchor="end" fontSize="3" fill="#d32f2f">折損過半</text>
+          </React.Fragment>
+        );
+      case 2: // 遵義
+        return (
+          <React.Fragment>
+             {/* City Wall */}
+             <rect x="25" y="30" width="50" height="35" rx="2" fill="#8d6e63" stroke="#5d4037" strokeWidth="2" />
+             <rect x="45" y="25" width="10" height="8" fill="#5d4037" />
+             <text x="50" y="50" textAnchor="middle" fontSize="6" fill="white" fontWeight="bold" className="font-serif">遵義會議</text>
+             
+             {/* Decision Paths */}
+             <path d="M 20 85 L 40 65" stroke="#bdbdbd" strokeWidth="2" strokeDasharray="3,3" markerEnd="url(#arrow-grey)" />
+             <text x="25" y="90" fontSize="3" fill="#757575">錯誤路線</text>
+             
+             <path d="M 50 30 L 50 10" stroke={RED} strokeWidth="4" markerEnd="url(#arrow)" />
+             <text x="50" y="8" textAnchor="middle" fontSize="5" fill={RED} fontWeight="bold" className="font-serif">正確航向</text>
+             
+             <circle cx="50" cy="50" r="20" fill="url(#shine)" opacity="0.2" />
+          </React.Fragment>
+        );
+      case 3: // 赤水
+        return (
+          <React.Fragment>
+             {/* River bends */}
+             <path d="M 15 10 C 90 20, 10 50, 85 60 C 10 70, 90 90, 15 95" stroke={BLUE} strokeWidth="8" fill="none" opacity="0.4" />
+             <text x="80" y="15" textAnchor="middle" fontSize="4" fill={BLUE} className="font-serif font-bold">赤水河</text>
+             
+             {/* Maneuver Lines */}
+             <path d="M 60 20 Q 20 30 60 40" stroke={RED} strokeWidth="2" fill="none" markerEnd="url(#arrow)" />
+             <path d="M 60 40 Q 90 50 40 60" stroke={RED} strokeWidth="2" fill="none" strokeDasharray="2,1" markerEnd="url(#arrow)" />
+             <path d="M 40 60 Q 10 70 50 80" stroke={RED} strokeWidth="2" fill="none" markerEnd="url(#arrow)" />
+             
+             <text x="50" y="50" textAnchor="middle" fontSize="5" fill={RED} fontWeight="bold" className="font-serif bg-white">穿插迂迴</text>
+          </React.Fragment>
+        );
+      case 4: // 金沙江
+        return (
+          <React.Fragment>
+             <path d="M 5 30 C 40 90, 60 90, 95 30" stroke={BLUE} strokeWidth="10" fill="none" opacity="0.4" />
+             <text x="50" y="85" textAnchor="middle" fontSize="5" fill="#455a64" className="font-serif font-bold">金沙江天險</text>
+             
+             {/* Boat */}
+             <path d="M 45 60 L 55 60 L 53 65 L 47 65 Z" fill="#3e2723" />
+             <line x1="50" y1="60" x2="50" y2="55" stroke="#3e2723" />
+             <rect x="48" y="55" width="4" height="3" fill="white" />
+             
+             {/* Route */}
+             <path d="M 50 95 L 50 68" stroke={RED} strokeWidth="2" strokeDasharray="3,1" />
+             <path d="M 50 55 L 50 10" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
+             
+             <text x="75" y="40" textAnchor="middle" fontSize="4" fill={RED} className="font-serif">甩掉追兵</text>
+          </React.Fragment>
+        );
+      case 5: // 瀘定橋
+        return (
+          <React.Fragment>
+             {/* Cliffs */}
+             <path d="M 0 0 L 25 0 L 25 100 L 0 100 Z" fill="#5d4037" />
+             <path d="M 75 0 L 100 0 L 100 100 L 75 100 Z" fill="#5d4037" />
+             
+             {/* Raging River */}
+             <rect x="25" y="0" width="50" height="100" fill={BLUE} opacity="0.6" />
+             <path d="M 30 20 Q 50 30 70 20 M 30 50 Q 50 60 70 50 M 30 80 Q 50 90 70 80" stroke="white" strokeWidth="1" fill="none" opacity="0.5" />
+             
+             {/* Chains */}
+             <line x1="25" y1="45" x2="75" y2="45" stroke="#212121" strokeWidth="1" />
+             <line x1="25" y1="55" x2="75" y2="55" stroke="#212121" strokeWidth="1" />
+             
+             {/* Assault */}
+             <path d="M 25 50 L 75 50" stroke={RED} strokeWidth="4" markerEnd="url(#arrow)" />
+             <text x="50" y="35" textAnchor="middle" fontSize="5" fill="#ffd600" fontWeight="bold" className="font-serif drop-shadow-md">22勇士</text>
+             <circle cx="75" cy="50" r="3" fill="#ffd600" className="animate-ping" />
+          </React.Fragment>
+        );
+      case 6: // 雪山
+        return (
+          <React.Fragment>
+             {/* Mountains */}
+             <path d="M 10 90 L 30 50 L 50 90 L 70 40 L 90 90" fill="none" stroke="#78909c" strokeWidth="2" />
+             {/* Snow Caps */}
+             <path d="M 25 60 L 30 50 L 35 60 Z" fill="white" />
+             <path d="M 65 50 L 70 40 L 75 50 Z" fill="white" />
+             
+             {/* Path */}
+             <path d="M 10 95 Q 30 70 50 95 Q 70 60 90 30" stroke={RED} strokeWidth="2" fill="none" strokeDasharray="3,2" markerEnd="url(#arrow)" />
+             <text x="70" y="30" textAnchor="middle" fontSize="4" fill={RED} fontWeight="bold" className="font-serif">艱難跋涉</text>
+          </React.Fragment>
+        );
+      case 7: // 吳起鎮
+        return (
+          <React.Fragment>
+             {/* Base Area */}
+             <path d="M 20 40 Q 50 20 80 40 Q 90 80 50 90 Q 10 80 20 40" fill="#fff9c4" stroke="#fbc02d" strokeWidth="2" strokeDasharray="4,2" />
+             <text x="50" y="65" textAnchor="middle" fontSize="6" fill="#f57f17" className="font-serif font-bold">陝北根據地</text>
+             
+             {/* Arrival Arrows */}
+             <path d="M 50 95 L 50 75" stroke={RED} strokeWidth="4" markerEnd="url(#arrow)" />
+             <path d="M 85 60 L 70 50" stroke={RED} strokeWidth="3" markerEnd="url(#arrow)" />
+             
+             {/* Star */}
+             <path d="M 50 35 L 53 45 L 63 45 L 55 52 L 58 62 L 50 55 L 42 62 L 45 52 L 37 45 L 47 45 Z" fill="#d32f2f" />
+             <text x="50" y="25" textAnchor="middle" fontSize="5" fill={RED} fontWeight="bold" className="font-serif">勝利會師</text>
+          </React.Fragment>
+        );
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="w-full h-40 bg-[#f5f5f5] rounded-lg border border-[#d7ccc8] mb-4 overflow-hidden relative shadow-inner">
+      <div className="absolute top-1 left-2 text-[10px] text-[#a1887f] font-bold uppercase tracking-widest font-serif border-b border-[#d7ccc8] pb-0.5">戰術示意圖</div>
+      <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#d32f2f" />
+          </marker>
+          <marker id="arrow-grey" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#546e7a" />
+          </marker>
+          <radialGradient id="shine">
+            <stop offset="0%" stopColor="#ffd600" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="#ffd600" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        {renderContent()}
+      </svg>
+    </div>
+  );
+};
+
+// QuizModal.tsx
+const QuizModal = ({ quizzes, isOpen, onClose }) => {
+  const [currentQIndex, setCurrentQIndex] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [showResult, setShowResult] = useState(false);
+  const [score, setScore] = useState(0);
+  const [isFinished, setIsFinished] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) resetQuiz();
+  }, [isOpen]);
+
+  const resetQuiz = () => {
+    setCurrentQIndex(0);
+    setSelected(null);
+    setShowResult(false);
+    setScore(0);
+    setIsFinished(false);
+  };
+
+  if (!isOpen || !quizzes || quizzes.length === 0) return null;
+  const currentQuiz = quizzes[currentQIndex];
+
+  const handleCheck = () => {
+    if (selected !== null) {
+      setShowResult(true);
+      if (selected === currentQuiz.answer) setScore(prev => prev + 1);
+    }
+  };
+
+  const handleNext = () => {
+    if (currentQIndex < quizzes.length - 1) {
+      setCurrentQIndex(prev => prev + 1);
+      setSelected(null);
+      setShowResult(false);
+    } else {
+      setIsFinished(true);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in-zoom">
+      <div className="bg-[#fff8e1] rounded-xl shadow-2xl max-w-lg w-full p-6 border-4 border-amber-600 relative overflow-hidden">
+        <div className="flex justify-between items-center mb-6 border-b border-amber-200 pb-4">
+          <h3 className="text-xl font-bold text-amber-800 flex items-center gap-2 font-serif">
+            <HelpCircle size={24} /> 隨堂知識問答
+          </h3>
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-800 transition-colors">
+            <X size={24} />
+          </button>
+        </div>
+
+        {!isFinished ? (
+          <>
+            <div className="mb-6">
+              <div className="flex justify-between text-xs font-bold text-stone-500 uppercase mb-1">
+                <span>問題 {currentQIndex + 1} / {quizzes.length}</span>
+                <span>得分: {score}</span>
               </div>
-              {!isFinished ? (
-                <React.Fragment>
-                  <div className="mb-6">
-                     <div className="flex justify-between text-xs font-bold text-[#8d6e63] uppercase mb-1"><span>問題 {currentQIndex + 1} / {quizzes.length}</span><span>得分: {score}</span></div>
-                     <div className="w-full bg-[#ffecb3] h-2.5 rounded-full overflow-hidden border border-[#ffe082]"><div className="bg-[#ff8f00] h-full transition-all duration-300 shadow-[0_0_10px_rgba(255,143,0,0.5)]" style={{ width: `${((currentQIndex + 1) / quizzes.length) * 100}%` }}></div></div>
-                  </div>
-                  <h4 className="text-lg font-bold text-[#3e2723] mb-6 min-h-[3.5rem] leading-snug">{currentQuiz.question}</h4>
-                  <div className="space-y-3 mb-6">
-                    {currentQuiz.options.map((option, idx) => {
-                      let btnClass = "w-full text-left p-4 rounded-xl border-2 transition-all duration-200 outline-none relative ";
-                      if (showResult) {
-                        if (idx === currentQuiz.answer) btnClass += "bg-[#e8f5e9] border-[#43a047] text-[#1b5e20] font-bold shadow-sm";
-                        else if (idx === selected && idx !== currentQuiz.answer) btnClass += "bg-[#ffebee] border-[#e53935] text-[#b71c1c] opacity-80";
-                        else btnClass += "border-[#e0e0e0] opacity-40";
-                      } else {
-                        btnClass += selected === idx ? "border-[#ff8f00] bg-[#fff3e0] text-[#e65100] shadow-md transform scale-[1.01]" : "border-[#d7ccc8] hover:border-[#ffcc80] hover:bg-[#fffde7] text-[#5d4037] bg-white";
-                      }
-                      return (
-                        <button key={idx} onClick={() => !showResult && setSelected(idx)} className={btnClass} disabled={showResult}>
-                          <div className="flex justify-between items-center">
-                            <span className="flex gap-3"><span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border shrink-0 ${showResult && idx === currentQuiz.answer ? 'bg-[#43a047] text-white border-[#43a047]' : (selected === idx ? 'bg-[#ff8f00] text-white border-[#ff8f00]' : 'bg-[#efebe9] text-[#8d6e63] border-[#bcaaa4]')}`}>{String.fromCharCode(65 + idx)}</span>{option}</span>
-                            {showResult && idx === currentQuiz.answer && <CheckCircle size={20} className="text-[#43a047]" />}
-                            {showResult && idx === selected && idx !== currentQuiz.answer && <XCircle size={20} className="text-[#e53935]" />}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-4">
-                    {showResult && currentQuiz.explanation && <div className="mb-4 bg-white p-4 rounded-lg text-sm text-[#4e342e] border border-[#ffcc80] animate-in fade-in slide-in-from-top-2 shadow-sm"><span className="font-bold text-[#e65100] mr-2 block mb-1">💡 知識點解析:</span>{currentQuiz.explanation}</div>}
-                    <div className="flex justify-end">
-                      {!showResult ? <button onClick={handleCheck} disabled={selected === null} className="px-6 py-2 bg-[#e65100] text-white rounded-lg font-bold hover:bg-[#ef6c00] disabled:opacity-50 disabled:bg-[#bdbdbd] disabled:cursor-not-allowed transition-all transform active:scale-95 shadow-md">提交答案</button> : <button onClick={handleNext} className="flex items-center gap-2 px-6 py-2 bg-[#3e2723] text-white rounded-lg font-bold hover:bg-[#4e342e] transition-all transform active:scale-95 shadow-md">{currentQIndex < quizzes.length - 1 ? "下一題" : "查看成績"} <ChevronRight size={18} /></button>}
+              <div className="w-full bg-amber-100 h-2.5 rounded-full overflow-hidden border border-amber-200">
+                <div 
+                  className="bg-amber-600 h-full transition-all duration-300" 
+                  style={{ width: `${((currentQIndex + 1) / quizzes.length) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+
+            <h4 className="text-lg font-bold text-stone-800 mb-6 min-h-[3.5rem] leading-snug">
+              {currentQuiz.question}
+            </h4>
+
+            <div className="space-y-3 mb-6">
+              {currentQuiz.options.map((option, idx) => {
+                let btnClass = "w-full text-left p-4 rounded-xl border-2 transition-all duration-200 outline-none relative ";
+                if (showResult) {
+                  if (idx === currentQuiz.answer) btnClass += "bg-green-50 border-green-600 text-green-900 font-bold shadow-sm";
+                  else if (idx === selected && idx !== currentQuiz.answer) btnClass += "bg-red-50 border-red-500 text-red-900 opacity-80";
+                  else btnClass += "border-stone-200 opacity-40";
+                } else {
+                  btnClass += selected === idx 
+                    ? "border-amber-500 bg-amber-50 text-amber-900 shadow-md transform scale-[1.01]" 
+                    : "border-stone-300 hover:border-amber-300 hover:bg-amber-50/50 text-stone-700 bg-white";
+                }
+                return (
+                  <button key={idx} onClick={() => !showResult && setSelected(idx)} className={btnClass} disabled={showResult}>
+                    <div className="flex justify-between items-center">
+                      <span className="flex gap-3">
+                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border shrink-0 ${
+                          showResult && idx === currentQuiz.answer ? 'bg-green-600 text-white border-green-600' : 
+                          (selected === idx ? 'bg-amber-500 text-white border-amber-500' : 'bg-stone-100 text-stone-500 border-stone-300')
+                        }`}>
+                          {String.fromCharCode(65 + idx)}
+                        </span>
+                        {option}
+                      </span>
+                      {showResult && idx === currentQuiz.answer && <CheckCircle size={20} className="text-green-600" />}
+                      {showResult && idx === selected && idx !== currentQuiz.answer && <XCircle size={20} className="text-red-600" />}
                     </div>
-                  </div>
-                </React.Fragment>
-              ) : (
-                <div className="text-center py-6 animate-in zoom-in duration-300">
-                   <div className="relative inline-block mb-4"><div className={`p-4 rounded-full ${score === quizzes.length ? 'bg-[#fff8e1] border-4 border-[#ffca28]' : 'bg-[#f5f5f5]'}`}><Trophy size={64} className={`${score === quizzes.length ? 'text-[#ffca28]' : 'text-[#bdbdbd]'}`} /></div>{score === quizzes.length && <div className="absolute -top-2 -right-2 text-[#e53935] animate-bounce"><Star size={32} fill="currentColor"/></div>}</div>
-                   <h2 className="text-3xl font-black text-[#3e2723] mb-2 font-serif">測驗結束</h2>
-                   <p className="text-[#8d6e63] mb-6">您的歷史知識水平</p>
-                   <div className="text-6xl font-black text-[#e65100] mb-2 tracking-tight">{score} <span className="text-2xl text-[#bdbdbd] font-medium">/ {quizzes.length}</span></div>
-                   <p className={`font-bold text-lg mb-8 ${score === quizzes.length ? 'text-[#2e7d32]' : (score >= quizzes.length / 2 ? 'text-[#f57f17]' : 'text-[#c62828]')}`}>{score === quizzes.length ? "太棒了！您是長征知識通！" : (score >= quizzes.length / 2 ? "成績不錯，繼續保持！" : "建議再仔細閱讀歷史資料喔。")}</p>
-                   <div className="flex justify-center gap-4"><button onClick={resetQuiz} className="flex items-center gap-2 px-6 py-2 border-2 border-[#d7ccc8] text-[#5d4037] rounded-lg hover:bg-[#efebe9] hover:border-[#bcaaa4] font-bold transition-colors"><RefreshCw size={18} /> 重測</button><button onClick={onClose} className="px-8 py-2 bg-[#b71c1c] text-white rounded-lg font-bold hover:bg-[#c62828] shadow-lg hover:shadow-xl transition-all">完成</button></div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-4">
+              {showResult && currentQuiz.explanation && (
+                <div className="mb-4 bg-white p-4 rounded-lg text-sm text-stone-700 border border-amber-200 shadow-sm">
+                  <span className="font-bold text-amber-700 mr-2 block mb-1">💡 知識點解析:</span>
+                  {currentQuiz.explanation}
                 </div>
               )}
+              <div className="flex justify-end">
+                {!showResult ? (
+                  <button 
+                    onClick={handleCheck} 
+                    disabled={selected === null} 
+                    className="px-6 py-2 bg-amber-700 text-white rounded-lg font-bold hover:bg-amber-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                  >
+                    提交答案
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleNext} 
+                    className="flex items-center gap-2 px-6 py-2 bg-stone-800 text-white rounded-lg font-bold hover:bg-stone-900 transition-all shadow-md"
+                  >
+                    {currentQIndex < quizzes.length - 1 ? "下一題" : "查看成績"} <ChevronRight size={18} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-6">
+            <div className="relative inline-block mb-4">
+              <div className={`p-4 rounded-full ${score === quizzes.length ? 'bg-amber-50 border-4 border-amber-400' : 'bg-stone-100'}`}>
+                <Trophy size={64} className={`${score === quizzes.length ? 'text-amber-400' : 'text-stone-300'}`} />
+              </div>
+            </div>
+            <h2 className="text-3xl font-black text-stone-800 mb-2 font-serif">測驗結束</h2>
+            <p className="text-stone-500 mb-6">您的歷史知識水平</p>
+            <div className="text-6xl font-black text-amber-700 mb-2 tracking-tight">
+              {score} <span className="text-2xl text-stone-400 font-medium">/ {quizzes.length}</span>
+            </div>
+            <p className="font-bold text-lg mb-8 text-stone-700">
+              {score === quizzes.length ? "太棒了！您是長征知識通！" : (score >= quizzes.length / 2 ? "成績不錯，繼續保持！" : "建議再仔細閱讀歷史資料喔。")}
+            </p>
+            <div className="flex justify-center gap-4">
+              <button onClick={resetQuiz} className="flex items-center gap-2 px-6 py-2 border-2 border-stone-300 text-stone-600 rounded-lg hover:bg-stone-100 font-bold transition-colors">
+                <RefreshCw size={18} /> 重測
+              </button>
+              <button onClick={onClose} className="px-8 py-2 bg-red-800 text-white rounded-lg font-bold hover:bg-red-900 shadow-lg transition-all">
+                完成
+              </button>
             </div>
           </div>
-        );
-      };
+        )}
+      </div>
+    </div>
+  );
+};
 
-      // --- 5. 組件: 生存遊戲模態框 (SurvivalGameModal) ---
-      const SurvivalGameModal = ({ milestones, isOpen, onClose }) => {
-        const [gameState, setGameState] = useState('intro');
-        const [currentStage, setCurrentStage] = useState(0);
-        const [food, setFood] = useState(60); 
-        const [morale, setMorale] = useState(60); 
-        const [feedback, setFeedback] = useState(null);
-        const [lastChanges, setLastChanges] = useState(null);
-        const [randomEvent, setRandomEvent] = useState(null);
+// SurvivalGameModal.tsx
+const SurvivalGameModal = ({ milestones, isOpen, onClose }) => {
+  const [gameState, setGameState] = useState('intro');
+  const [currentStage, setCurrentStage] = useState(0);
+  const [food, setFood] = useState(60); 
+  const [morale, setMorale] = useState(60); 
+  const [feedback, setFeedback] = useState(null);
+  const [lastChanges, setLastChanges] = useState(null);
+  const [randomEvent, setRandomEvent] = useState(null);
+  
+  const [foodShaking, setFoodShaking] = useState(false);
+  const [moraleShaking, setMoraleShaking] = useState(false);
+
+  useEffect(() => { if (isOpen) resetGame(); }, [isOpen]);
+
+  const resetGame = () => {
+    setGameState('intro');
+    setCurrentStage(0);
+    setFood(60);
+    setMorale(60);
+    setFeedback(null);
+    setLastChanges(null);
+    setRandomEvent(null);
+  };
+
+  const handleOptionSelect = (option) => {
+    const newFood = Math.min(100, Math.max(0, food + option.foodChange));
+    const newMorale = Math.min(100, Math.max(0, morale + option.moraleChange));
+    
+    if (option.foodChange < 0) { setFoodShaking(true); setTimeout(() => setFoodShaking(false), 500); }
+    if (option.moraleChange < 0) { setMoraleShaking(true); setTimeout(() => setMoraleShaking(false), 500); }
+
+    setFood(newFood);
+    setMorale(newMorale);
+    setFeedback(option.result);
+    setLastChanges({ food: option.foodChange, morale: option.moraleChange });
+
+    if (newFood <= 0 || newMorale <= 0) { setTimeout(() => setGameState('gameover'), 2000); }
+  };
+
+  const nextStage = () => {
+    setFeedback(null);
+    setLastChanges(null);
+    setRandomEvent(null);
+
+    const eventChance = Math.random();
+    let currentFood = food;
+    let currentMorale = morale;
+
+    if (eventChance < 0.3 && currentStage < milestones.length - 1 && currentFood > 10 && currentMorale > 10) {
+        const events = [
+            { text: "遭遇敵機轟炸！糧食被燒毀！", f: -10, m: 0 },
+            { text: "暴雨導致傷寒流行，士氣低落。", f: 0, m: -10 },
+            { text: "迷路多走了冤枉路，消耗體力。", f: -5, m: -5 }
+        ];
+        const evt = events[Math.floor(Math.random() * events.length)];
+        currentFood = Math.max(0, currentFood + evt.f);
+        currentMorale = Math.max(0, currentMorale + evt.m);
+        setFood(currentFood);
+        setMorale(currentMorale);
+        setRandomEvent(evt.text);
+        setFoodShaking(true);
+        setMoraleShaking(true);
+        setTimeout(() => {setFoodShaking(false); setMoraleShaking(false);}, 500);
+    }
+
+    if (currentFood <= 0 || currentMorale <= 0) { setGameState('gameover'); return; }
+    if (currentStage < milestones.length - 1) { setCurrentStage(prev => prev + 1); } else { setGameState('result'); }
+  };
+
+  const getRank = (score) => {
+    if (score >= 160) return { title: "長征軍神", color: "text-amber-600", desc: "你的指揮藝術出神入化，堪比毛澤東！" };
+    if (score >= 120) return { title: "優秀指揮員", color: "text-red-700", desc: "你帶領部隊完好無損地到達了陝北。" };
+    if (score >= 80) return { title: "合格戰士", color: "text-blue-700", desc: "雖然歷經磨難，但你堅持到了最後。" };
+    return { title: "倖存者", color: "text-stone-700", desc: "你勉強活了下來，這本身就是奇蹟。" };
+  };
+
+  if (!isOpen) return null;
+  const currentMilestone = milestones[currentStage];
+  const challenge = currentMilestone.game;
+  const totalScore = food + morale;
+  const rank = getRank(totalScore);
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in-zoom">
+      <div className="bg-[#fdfbf7] rounded-xl max-w-4xl w-full shadow-2xl overflow-hidden border-4 border-stone-700 flex flex-col max-h-[95vh] relative">
+        <div className="bg-[#3e2723] p-4 text-[#fff8e1] flex justify-between items-center shrink-0 shadow-lg z-10 border-b border-stone-700">
+          <div className="flex items-center gap-2">
+            <Trophy size={20} className="text-amber-400" />
+            <h2 className="text-lg font-bold tracking-widest uppercase font-serif">生存挑戰模式</h2>
+          </div>
+          <button onClick={onClose} className="hover:text-white transition-colors bg-white/10 p-1.5 rounded-full hover:bg-white/20">
+            <X size={20} />
+          </button>
+        </div>
         
-        const [foodShaking, setFoodShaking] = useState(false);
-        const [moraleShaking, setMoraleShaking] = useState(false);
-
-        useEffect(() => { if (isOpen) resetGame(); }, [isOpen]);
-
-        const resetGame = () => {
-          setGameState('intro');
-          setCurrentStage(0);
-          setFood(60);
-          setMorale(60);
-          setFeedback(null);
-          setLastChanges(null);
-          setRandomEvent(null);
-        };
-
-        const handleOptionSelect = (option) => {
-          const newFood = Math.min(100, Math.max(0, food + option.foodChange));
-          const newMorale = Math.min(100, Math.max(0, morale + option.moraleChange));
-          
-          if (option.foodChange < 0) { setFoodShaking(true); setTimeout(() => setFoodShaking(false), 500); }
-          if (option.moraleChange < 0) { setMoraleShaking(true); setTimeout(() => setMoraleShaking(false), 500); }
-
-          setFood(newFood);
-          setMorale(newMorale);
-          setFeedback(option.result);
-          setLastChanges({ food: option.foodChange, morale: option.moraleChange });
-
-          if (newFood <= 0 || newMorale <= 0) { setTimeout(() => setGameState('gameover'), 2000); }
-        };
-
-        const nextStage = () => {
-          setFeedback(null);
-          setLastChanges(null);
-          setRandomEvent(null);
-
-          const eventChance = Math.random();
-          let currentFood = food;
-          let currentMorale = morale;
-
-          if (eventChance < 0.3 && currentStage < milestones.length - 1 && currentFood > 10 && currentMorale > 10) {
-              const events = [
-                  { text: "遭遇敵機轟炸！糧食被燒毀！", f: -10, m: 0 },
-                  { text: "暴雨導致傷寒流行，士氣低落。", f: 0, m: -10 },
-                  { text: "迷路多走了冤枉路，消耗體力。", f: -5, m: -5 }
-              ];
-              const evt = events[Math.floor(Math.random() * events.length)];
-              currentFood = Math.max(0, currentFood + evt.f);
-              currentMorale = Math.max(0, currentMorale + evt.m);
-              setFood(currentFood);
-              setMorale(currentMorale);
-              setRandomEvent(evt.text);
-              setFoodShaking(true);
-              setMoraleShaking(true);
-              setTimeout(() => {setFoodShaking(false); setMoraleShaking(false);}, 500);
-          }
-
-          if (currentFood <= 0 || currentMorale <= 0) { setGameState('gameover'); return; }
-          if (currentStage < milestones.length - 1) { setCurrentStage(prev => prev + 1); } else { setGameState('result'); }
-        };
-
-        const getRank = (score) => {
-          if (score >= 160) return { title: "長征軍神", color: "text-[#f9a825]", desc: "你的指揮藝術出神入化，堪比毛澤東！" };
-          if (score >= 120) return { title: "優秀指揮員", color: "text-[#c62828]", desc: "你帶領部隊完好無損地到達了陝北。" };
-          if (score >= 80) return { title: "合格戰士", color: "text-[#1565c0]", desc: "雖然歷經磨難，但你堅持到了最後。" };
-          return { title: "倖存者", color: "text-[#4e342e]", desc: "你勉強活了下來，這本身就是奇蹟。" };
-        };
-
-        if (!isOpen) return null;
-        const currentMilestone = milestones[currentStage];
-        const challenge = currentMilestone.game;
-        const totalScore = food + morale;
-        const rank = getRank(totalScore);
-        const getBarColor = (value, type) => {
-            if (value <= 30) return 'bg-[#c62828]';
-            if (value <= 60) return 'bg-[#fbc02d]';
-            return type === 'food' ? 'bg-[#ff9800]' : 'bg-[#e53935]';
-        };
-
-        return (
-          <div className="fixed inset-0 bg-[#263238]/90 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
-            <div className="bg-[#fdfbf7] rounded-xl max-w-4xl w-full shadow-2xl overflow-hidden border-4 border-[#5d4037] flex flex-col max-h-[95vh] relative">
-              <div className="bg-[#3e2723] p-4 text-[#fff8e1] flex justify-between items-center shrink-0 shadow-lg z-10 border-b border-[#5d4037]"><div className="flex items-center gap-2"><Trophy size={20} className="text-[#fbc02d]" /><h2 className="text-lg font-bold tracking-widest uppercase font-serif">生存挑戰模式</h2></div><button onClick={onClose} className="hover:text-white transition-colors bg-white/10 p-1.5 rounded-full hover:bg-white/20"><X size={20} /></button></div>
-              
-              {gameState === 'intro' && (
-                <div className="p-8 flex flex-col items-center text-center space-y-6 bg-paper overflow-y-auto h-full justify-center">
-                  <div className="w-24 h-24 bg-[#8b1c1c] rounded-full flex items-center justify-center mb-2 shadow-xl border-4 border-[#d7ccc8] animate-in zoom-in duration-500"><Wheat size={48} className="text-[#fdd835]" /></div>
-                  <h1 className="text-4xl font-black text-[#3e2723] font-serif">重走長征路</h1>
-                  <div className="bg-[#fff3e0] p-6 rounded-lg border border-[#ffe0b2] max-w-lg mx-auto shadow-sm relative"><div className="absolute top-2 left-2 text-[#ffcc80]"><Scroll size={20} /></div><p className="text-[#4e342e] text-base md:text-lg leading-relaxed font-serif text-justify font-medium pt-2">1934年，由於第五次反「圍剿」失敗，國民黨軍隊步步進逼。中央紅軍被迫撤離根據地，開始戰略轉移。前有堵截，後有追兵。你臨危受命，必須帶領部隊在絕境中求生。</p></div>
-                  <div className="grid grid-cols-2 gap-8 w-full max-w-sm mt-4"><div className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-[#d7ccc8] shadow-sm"><span className="font-bold text-[#f57f17] text-3xl">60</span><div className="flex items-center gap-1 text-xs text-[#5d4037] uppercase font-bold"><Wheat size={14}/> 初始糧食</div></div><div className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-[#d7ccc8] shadow-sm"><span className="font-bold text-[#c62828] text-3xl">60</span><div className="flex items-center gap-1 text-xs text-[#5d4037] uppercase font-bold"><Heart size={14}/> 初始士氣</div></div></div>
-                  <button onClick={() => setGameState('playing')} className="px-10 py-3 bg-[#b71c1c] text-[#fff8e1] text-xl font-bold rounded-xl shadow-lg hover:shadow-xl hover:bg-[#c62828] transform hover:-translate-y-0.5 active:translate-y-0 transition-all w-full md:w-auto mt-6 border border-[#ef5350]">接受命令</button>
-                </div>
-              )}
-
-              {gameState === 'playing' && challenge && (
-                <div className="flex flex-col h-full bg-paper">
-                  <div className="bg-[#efebe9] p-4 flex justify-around items-center border-b border-[#d7ccc8] shadow-inner shrink-0 z-10">
-                     <div className={`flex flex-col md:flex-row items-center gap-2 md:gap-4 w-1/2 justify-center transition-transform ${foodShaking ? 'translate-x-[-2px]' : ''}`}><div className="flex items-center gap-2 text-[#f57f17] font-bold text-sm uppercase"><Wheat size={18} /> 糧食</div><div className="w-full max-w-[140px] h-4 bg-[#d7ccc8] rounded-full overflow-hidden border border-[#bcaaa4] relative shadow-inner"><div className={`h-full transition-all duration-700 ${getBarColor(food, 'food')}`} style={{ width: `${food}%` }}></div></div><span className={`font-mono font-bold w-8 text-right text-lg ${food <= 30 ? 'text-[#c62828]' : 'text-[#5d4037]'}`}>{food}</span></div>
-                     <div className="h-8 w-px bg-[#d7ccc8]"></div>
-                     <div className={`flex flex-col md:flex-row items-center gap-2 md:gap-4 w-1/2 justify-center transition-transform ${moraleShaking ? 'translate-x-[-2px]' : ''}`}><div className="flex items-center gap-2 text-[#c62828] font-bold text-sm uppercase"><Heart size={18} /> 士氣</div><div className="w-full max-w-[140px] h-4 bg-[#d7ccc8] rounded-full overflow-hidden border border-[#bcaaa4] relative shadow-inner"><div className={`h-full transition-all duration-700 ${getBarColor(morale, 'morale')}`} style={{ width: `${morale}%` }}></div></div><span className={`font-mono font-bold w-8 text-right text-lg ${morale <= 30 ? 'text-[#c62828]' : 'text-[#5d4037]'}`}>{morale}</span></div>
-                  </div>
-                  {randomEvent && <div className="bg-[#ffcdd2] border-b border-[#ef9a9a] p-2 text-center text-[#b71c1c] font-bold flex items-center justify-center gap-2 animate-slide-up shadow-sm"><AlertTriangle size={18} />突發：{randomEvent}</div>}
-                  <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
-                     <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#d7ccc8]"><span className="text-xs font-bold text-[#8d6e63] border border-[#d7ccc8] px-2 py-1 rounded bg-white">第 {currentStage + 1} 關</span><span className="text-sm font-bold text-[#5d4037] font-serif tracking-wide">{currentMilestone.date}</span></div>
-                     <h2 className="text-2xl md:text-3xl font-black text-[#3e2723] mb-4 font-serif">{currentMilestone.title}</h2>
-                     <div className="bg-white p-6 rounded-xl border border-[#d7ccc8] mb-8 shadow-sm flex gap-4"><ShieldCheck className="shrink-0 text-[#8d6e63] mt-1" size={28} /><p className="text-base md:text-lg text-[#4e342e] font-medium leading-relaxed font-serif">{challenge.scenario}</p></div>
-                     {feedback ? (
-                       <div className="animate-in zoom-in duration-300 bg-[#fff8e1] border-2 border-[#ffecb3] rounded-xl p-8 shadow-lg text-center max-w-2xl mx-auto">
-                          <h3 className="text-xl font-bold text-[#3e2723] mb-2 font-serif">後果</h3><p className="text-[#5d4037] mb-8 text-lg">{feedback}</p>
-                          <div className="flex justify-center gap-12 mb-8 border-t border-b border-[#ffe0b2] py-4">{lastChanges && (<><div className={`flex flex-col items-center ${lastChanges.food === 0 ? 'opacity-50' : ''}`}><span className="text-xs text-[#8d6e63] font-bold uppercase mb-1">糧食變動</span><span className={`text-2xl font-black ${lastChanges.food >= 0 ? 'text-[#388e3c]' : 'text-[#c62828]'}`}>{lastChanges.food > 0 ? '+' : ''}{lastChanges.food}</span></div><div className={`flex flex-col items-center ${lastChanges.morale === 0 ? 'opacity-50' : ''}`}><span className="text-xs text-[#8d6e63] font-bold uppercase mb-1">士氣變動</span><span className={`text-2xl font-black ${lastChanges.morale >= 0 ? 'text-[#388e3c]' : 'text-[#c62828]'}`}>{lastChanges.morale > 0 ? '+' : ''}{lastChanges.morale}</span></div></>)}</div>
-                          <button onClick={nextStage} className="inline-flex items-center gap-2 px-8 py-3 bg-[#3e2723] text-[#fff8e1] rounded-lg font-bold hover:bg-[#4e342e] transition-all shadow-md hover:shadow-lg">{currentStage < milestones.length - 1 ? "繼續前進" : "查看結果"} <ArrowRight size={20} /></button>
-                       </div>
-                     ) : (
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{challenge.options.map((option, idx) => (<button key={idx} onClick={() => handleOptionSelect(option)} className="text-left p-5 bg-white border-2 border-[#d7ccc8] rounded-xl hover:border-[#b71c1c] hover:bg-[#ffebee] hover:shadow-md transition-all group relative overflow-hidden flex flex-col h-full"><div className="flex gap-3"><span className="flex-shrink-0 w-8 h-8 rounded-full bg-[#eceff1] text-[#455a64] flex items-center justify-center font-bold text-sm group-hover:bg-[#ffcdd2] group-hover:text-[#b71c1c] transition-colors border border-[#cfd8dc]">{String.fromCharCode(65 + idx)}</span><span className="font-bold text-[#3e2723] text-base md:text-lg group-hover:text-[#b71c1c] leading-tight">{option.label}</span></div></button>))}</div>
-                     )}
-                  </div>
-                </div>
-              )}
-
-              {gameState === 'gameover' && (
-                <div className="p-8 flex flex-col items-center text-center justify-center h-full space-y-6 bg-[#ffebee]">
-                   <div className="relative"><Skull size={80} className="text-[#c62828] animate-pulse" /></div><h2 className="text-4xl font-black text-[#b71c1c] font-serif">長征失敗</h2>
-                   <div className="bg-white p-6 rounded-xl shadow-sm border border-[#ef9a9a] max-w-md"><p className="text-[#c62828] text-lg font-medium">{food <= 0 ? "糧食耗盡，部隊飢寒交迫，倒在了雪山草地之中。" : "士氣崩潰，部隊渙散，在敵人的圍追堵截下失敗了。"}</p></div>
-                   <button onClick={resetGame} className="flex items-center gap-2 px-8 py-3 bg-[#c62828] text-white font-bold rounded-xl hover:bg-[#b71c1c] transition-all shadow-lg hover:shadow-red-900/30 mt-4"><RefreshCw size={20} /> 重新挑戰</button>
-                </div>
-              )}
-
-              {gameState === 'result' && (
-                <div className="p-8 flex flex-col items-center text-center justify-center h-full space-y-6 bg-[#fff8e1]">
-                   <div className="relative animate-bounce"><Trophy size={100} className="text-[#ffb300] drop-shadow-xl" /><Star size={40} className="text-[#d32f2f] absolute -top-4 -right-4 animate-spin-slow drop-shadow-md" fill="currentColor" /></div>
-                   <div><h2 className="text-4xl font-black text-[#e65100] mb-2 font-serif">長征勝利！</h2><p className="text-[#f57f17] text-lg max-w-md mx-auto font-medium">你克服了重重困難，帶領紅軍到達陝北！</p></div>
-                   <div className="bg-white p-8 rounded-xl shadow-xl border-4 border-[#ffb300] w-full max-w-sm relative overflow-hidden">
-                      <div className="text-xs text-[#8d6e63] font-bold uppercase tracking-widest mb-2">獲得榮譽稱號</div><div className={`text-3xl font-black ${rank.color} flex items-center justify-center gap-2 mb-2 font-serif`}><Medal size={32} /> {rank.title}</div><p className="text-sm text-[#5d4037] italic border-b border-[#ffe0b2] pb-4 mb-4">{rank.desc}</p>
-                      <div className="flex justify-between items-end"><div className="text-left"><div className="text-xs text-[#8d6e63] font-bold uppercase">總得分</div><div className="text-4xl font-black text-[#3e2723] leading-none">{totalScore}</div></div><div className="flex gap-4 text-sm font-bold text-[#5d4037]"><div className="flex flex-col items-center"><Wheat size={16} className="text-[#f57f17]"/> <span>{food}</span></div><div className="flex flex-col items-center"><Heart size={16} className="text-[#c62828]"/> <span>{morale}</span></div></div></div>
-                   </div>
-                   <div className="flex gap-4 mt-2"><button onClick={onClose} className="px-6 py-2 border-2 border-[#d7ccc8] text-[#5d4037] font-bold rounded-lg hover:bg-[#efebe9] transition-all">返回地圖</button><button onClick={resetGame} className="flex items-center gap-2 px-6 py-2 bg-[#b71c1c] text-white font-bold rounded-lg hover:bg-[#c62828] transition-all shadow-md hover:shadow-lg"><RefreshCw size={18} /> 再玩一次</button></div>
-                </div>
-              )}
+        {gameState === 'intro' && (
+          <div className="p-8 flex flex-col items-center text-center space-y-6 bg-[url('https://www.transparenttextures.com/patterns/cream-dust.png')] overflow-y-auto h-full justify-center">
+            <div className="w-24 h-24 bg-[#8b1c1c] rounded-full flex items-center justify-center mb-2 shadow-xl border-4 border-stone-200">
+              <Wheat size={48} className="text-amber-300" />
             </div>
+            <h1 className="text-4xl font-black text-stone-800 font-serif">重走長征路</h1>
+            <div className="bg-orange-50 p-6 rounded-lg border border-orange-200 max-w-lg mx-auto shadow-sm relative">
+              <div className="absolute top-2 left-2 text-orange-300"><Scroll size={20} /></div>
+              <p className="text-stone-700 text-base md:text-lg leading-relaxed font-serif text-justify font-medium pt-2">
+                1934年，由於第五次反「圍剿」失敗，國民黨軍隊步步進逼。中央紅軍被迫撤離根據地，開始戰略轉移。前有堵截，後有追兵。你臨危受命，必須帶領部隊在絕境中求生。
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-8 w-full max-w-sm mt-4">
+              <div className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-stone-200 shadow-sm">
+                <span className="font-bold text-orange-500 text-3xl">60</span>
+                <div className="flex items-center gap-1 text-xs text-stone-500 uppercase font-bold"><Wheat size={14}/> 初始糧食</div>
+              </div>
+              <div className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-stone-200 shadow-sm">
+                <span className="font-bold text-red-700 text-3xl">60</span>
+                <div className="flex items-center gap-1 text-xs text-stone-500 uppercase font-bold"><Heart size={14}/> 初始士氣</div>
+              </div>
+            </div>
+            <button onClick={() => setGameState('playing')} className="px-10 py-3 bg-[#b71c1c] text-[#fff8e1] text-xl font-bold rounded-xl shadow-lg hover:shadow-xl hover:bg-[#c62828] transform hover:-translate-y-0.5 active:translate-y-0 transition-all w-full md:w-auto mt-6 border border-red-400">
+              接受命令
+            </button>
           </div>
-        );
-      };
+        )}
 
-      // --- 6. 組件: 地圖視圖 (MapView) ---
-      const MapView = ({ currentStep, onNodeClick }) => {
-        const [hoveredIndex, setHoveredIndex] = useState(null);
-        const timelineRef = useRef(null);
-
-        const PROVINCES = [{ name: '江西', x: 74, y: 70, r: 0 }, { name: '福建', x: 80, y: 72, r: 0 }, { name: '湖南', x: 65, y: 68, r: 0 }, { name: '貴州', x: 55, y: 70, r: 0 }, { name: '雲南', x: 42, y: 78, r: -15 }, { name: '四川', x: 48, y: 58, r: 0 }, { name: '西康', x: 30, y: 58, r: 0 }, { name: '陝西', x: 60, y: 48, r: 0 }, { name: '甘肅', x: 45, y: 40, r: 0 }, { name: '山西', x: 68, y: 38, r: 0 }, { name: '河南', x: 70, y: 50, r: 0 }, { name: '湖北', x: 68, y: 60, r: 0 }, { name: '廣東', x: 72, y: 82, r: 0 }, { name: '廣西', x: 60, y: 80, r: 0 }, { name: '青海', x: 30, y: 42, r: 0 }, { name: '西藏', x: 20, y: 60, r: 0 }, { name: '內蒙古', x: 60, y: 25, r: 0 }, { name: '新疆', x: 15, y: 25, r: 0 }];
-        const CITIES = [{ name: '北平', x: 76, y: 32 }, { name: '南京', x: 82, y: 58 }, { name: '上海', x: 88, y: 60 }, { name: '廣州', x: 72, y: 85 }, { name: '西安', x: 60, y: 48 }, { name: '成都', x: 48, y: 58 }, { name: '昆明', x: 40, y: 78 }, { name: '武漢', x: 70, y: 60 }, { name: '蘭州', x: 50, y: 42 }];
-
-        useEffect(() => {
-          if (timelineRef.current) {
-            const activeNode = timelineRef.current.children[currentStep];
-            if (activeNode) {
-              const containerWidth = timelineRef.current.offsetWidth;
-              const nodeLeft = activeNode.offsetLeft;
-              const nodeWidth = activeNode.offsetWidth;
-              timelineRef.current.scrollTo({ left: nodeLeft - containerWidth / 2 + nodeWidth / 2, behavior: 'smooth' });
-            }
-          }
-        }, [currentStep]);
-
-        const generatePath = () => { let d = `M ${MILESTONES[0].coords.x} ${MILESTONES[0].coords.y}`; for (let i = 1; i < MILESTONES.length; i++) { d += ` L ${MILESTONES[i].coords.x} ${MILESTONES[i].coords.y}`; } return d; };
-        const generateActivePath = () => { if (currentStep === 0) return ""; let d = `M ${MILESTONES[0].coords.x} ${MILESTONES[0].coords.y}`; for (let i = 1; i <= currentStep; i++) { d += ` L ${MILESTONES[i].coords.x} ${MILESTONES[i].coords.y}`; } return d; };
-
-        const renderTerrainDecorations = () => (
-          <g className="pointer-events-none opacity-60">
-            <foreignObject x={MILESTONES[1].coords.x - 5} y={MILESTONES[1].coords.y + 2} width="6" height="6"><Waves size="100%" color="#607d8b" className="opacity-60" /></foreignObject>
-            <foreignObject x={MILESTONES[3].coords.x - 4} y={MILESTONES[3].coords.y - 6} width="6" height="6"><Waves size="100%" color="#607d8b" style={{ transform: 'rotate(45deg)' }} className="opacity-60" /></foreignObject>
-            <foreignObject x={MILESTONES[4].coords.x + 2} y={MILESTONES[4].coords.y - 2} width="6" height="6"><Waves size="100%" color="#607d8b" style={{ transform: 'rotate(-30deg)' }} className="opacity-60" /></foreignObject>
-            <foreignObject x={MILESTONES[5].coords.x - 6} y={MILESTONES[5].coords.y} width="6" height="6"><Waves size="100%" color="#607d8b" style={{ transform: 'rotate(90deg)' }} className="opacity-60" /></foreignObject>
-            <foreignObject x={MILESTONES[6].coords.x - 10} y={MILESTONES[6].coords.y - 8} width="12" height="12"><Mountain size="100%" color="#4e342e" fill="#5d4037" className="opacity-90" /></foreignObject>
-            <foreignObject x={MILESTONES[2].coords.x - 6} y={MILESTONES[2].coords.y + 5} width="6" height="6"><Mountain size="100%" color="#4e342e" className="opacity-60" /></foreignObject>
-            <foreignObject x="15" y="60" width="10" height="10"><Mountain size="100%" color="#4e342e" className="opacity-40" /></foreignObject>
-            <foreignObject x="25" y="65" width="8" height="8"><Mountain size="100%" color="#4e342e" className="opacity-40" /></foreignObject>
-            <foreignObject x="10" y="30" width="8" height="8"><Mountain size="100%" color="#4e342e" className="opacity-30" /></foreignObject>
-          </g>
-        );
-
-        return (
-          <div className="flex flex-col w-full h-full gap-2">
-            <div className="relative flex-1 bg-[#e0f2f1] rounded-xl overflow-hidden shadow-[inset_0_0_40px_rgba(0,0,0,0.15)] border-4 border-[#8d6e63]">
-              <div className="absolute top-4 right-4 text-[#3e2723] font-serif text-xl md:text-3xl font-bold select-none pointer-events-none z-10 tracking-widest bg-[#fff8e1]/80 backdrop-blur-sm px-4 py-2 rounded-lg border border-[#8d6e63]/50 shadow-sm">中國工農紅軍長征路線</div>
-              <div className="absolute bottom-4 left-4 bg-[#fff8e1]/90 backdrop-blur-md p-2 rounded-lg border border-[#8d6e63] shadow-lg z-10 text-[10px] md:text-xs select-none hidden md:block">
-                <div className="font-bold text-[#3e2723] mb-1 border-b border-[#8d6e63]/30 pb-1">圖例</div>
-                <div className="grid grid-cols-1 gap-1.5">
-                  <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#b71c1c] border border-[#fff8e1] shadow-sm"></div><span className="text-[#5d4037]">長征路線節點</span></div>
-                  <div className="flex items-center gap-2"><div className="w-6 h-0.5 bg-[#b71c1c]"></div><span className="text-[#5d4037]">行軍路線</span></div>
-                  <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#e57373] border border-[#c62828] opacity-80"></div><span className="text-[#5d4037]">革命根據地</span></div>
-                  <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#78909c] border border-[#fff8e1]"></div><span className="text-[#5d4037]">主要城市</span></div>
-                  <div className="flex items-center gap-2"><div className="w-3 h-1 bg-[#81d4fa]"></div><span className="text-[#5d4037]">主要河流</span></div>
+        {gameState === 'playing' && challenge && (
+          <div className="flex flex-col h-full bg-[url('https://www.transparenttextures.com/patterns/cream-dust.png')]">
+            <div className="bg-[#efebe9] p-4 flex justify-around items-center border-b border-stone-300 shadow-inner shrink-0 z-10">
+                <div className={`flex flex-col md:flex-row items-center gap-2 md:gap-4 w-1/2 justify-center transition-transform ${foodShaking ? 'translate-x-[-2px]' : ''}`}>
+                  <div className="flex items-center gap-2 text-orange-600 font-bold text-sm uppercase"><Wheat size={18} /> 糧食</div>
+                  <div className="w-full max-w-[140px] h-4 bg-stone-300 rounded-full overflow-hidden border border-stone-400 relative shadow-inner">
+                    <div className={`h-full transition-all duration-700 ${food <= 30 ? 'bg-red-700' : 'bg-orange-500'}`} style={{ width: `${food}%` }}></div>
+                  </div>
+                  <span className={`font-mono font-bold w-8 text-right text-lg ${food <= 30 ? 'text-red-700' : 'text-stone-700'}`}>{food}</span>
                 </div>
-              </div>
-              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
-                <defs>
-                  <filter id="ruggedPath" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" result="noise" /><feDisplacementMap in="SourceGraphic" in2="noise" scale="1.5" /></filter>
-                  <filter id="landShadow" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0.5" dy="0.5" stdDeviation="0.5" floodColor="#3e2723" floodOpacity="0.3" /></filter>
-                  <filter id="paperTexture"><feTurbulence type="fractalNoise" baseFrequency="0.4" numOctaves="4" result="noise"/><feDiffuseLighting in="noise" lightingColor="#fff8e1" surfaceScale="2"><feDistantLight azimuth="45" elevation="60"/></feDiffuseLighting><feComposite operator="in" in2="SourceGraphic"/><feBlend in="SourceGraphic" mode="multiply"/></filter>
-                  <pattern id="seaPattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 0 10 Q 5 5 10 10 T 20 10" fill="none" stroke="#b2dfdb" strokeWidth="0.5" opacity="0.6"/></pattern>
-                </defs>
-                <rect width="100" height="100" fill="#e0f2f1" /><rect width="100" height="100" fill="url(#seaPattern)" opacity="0.4" />
-                <g filter="url(#landShadow)"><path d="M 5 25 Q 15 20, 35 15 Q 45 12, 60 12 Q 75 10, 85 5 L 95 10 L 96 18 L 88 20 Q 80 22, 82 28 L 88 32 Q 90 38, 85 40 L 88 50 Q 90 55, 88 62 Q 85 70, 75 75 L 75 80 L 70 82 L 60 82 Q 50 85, 45 80 L 35 75 Q 30 70, 25 65 L 10 60 Q 5 50, 5 35 Z" fill="#fff9c4" stroke="#8d6e63" strokeWidth="0.3" /><path d="M 88 72 L 90 70 L 91 74 L 89 76 Z" fill="#fff9c4" stroke="#8d6e63" strokeWidth="0.3" /><path d="M 62 88 L 66 87 L 67 90 L 63 91 Z" fill="#fff9c4" stroke="#8d6e63" strokeWidth="0.3" /><path d="M 5 25 Q 15 20, 35 15 Q 45 12, 60 12 Q 75 10, 85 5 L 95 10 L 96 18 L 88 20 Q 80 22, 82 28 L 88 32 Q 90 38, 85 40 L 88 50 Q 90 55, 88 62 Q 85 70, 75 75 L 75 80 L 70 82 L 60 82 Q 50 85, 45 80 L 35 75 Q 30 70, 25 65 L 10 60 Q 5 50, 5 35 Z" fill="transparent" filter="url(#paperTexture)" opacity="0.5" /></g>
-                <g className="pointer-events-none select-none">{PROVINCES.map((p, i) => (<text key={i} x={p.x} y={p.y} transform={`rotate(${p.r}, ${p.x}, ${p.y})`} fontSize="1.8" fill="#5d4037" opacity="0.7" textAnchor="middle" fontWeight="bold" style={{ letterSpacing: '0.5px', fontFamily: 'serif' }}>{p.name}</text>))}</g>
-                <path d="M 68 68 Q 75 66 78 71 Q 75 76 70 74 Q 66 72 68 68 Z" fill="#ef9a9a" stroke="#c62828" strokeWidth="0.2" className="opacity-70 hover:opacity-90 transition-opacity duration-300" /><text x="73" y="72" fontSize="1.5" fill="#b71c1c" fontWeight="bold" textAnchor="middle" className="opacity-60" style={{ fontFamily: 'serif' }}>中央蘇區</text><path d="M 55 35 Q 60 33 62 38 Q 60 43 55 40 Q 53 38 55 35 Z" fill="#fff59d" stroke="#fbc02d" strokeWidth="0.2" className="opacity-70 hover:opacity-90 transition-opacity duration-300" /><text x="58" y="39" fontSize="1.5" fill="#f57f17" fontWeight="bold" textAnchor="middle" className="opacity-60" style={{ fontFamily: 'serif' }}>陝北根據地</text>
-                <path d="M 35 42 Q 40 35, 45 35 L 50 30 L 60 28 L 65 35 L 65 42 L 75 40 L 82 28" fill="none" stroke="#81d4fa" strokeWidth="0.5" strokeLinecap="round" className="opacity-70" /><path d="M 25 50 Q 35 60, 40 55 Q 45 50, 48 55 L 55 60 L 65 55 L 75 60 L 88 58" fill="none" stroke="#81d4fa" strokeWidth="0.5" strokeLinecap="round" className="opacity-70" />
-                <g>{CITIES.map((c, i) => (<g key={i} className="pointer-events-none"><circle cx={c.x} cy={c.y} r="0.4" fill="#607d8b" stroke="#eceff1" strokeWidth="0.1" /><text x={c.x + 1} y={c.y + 0.5} fontSize="1.2" fill="#455a64" className="opacity-80" style={{ fontFamily: 'serif' }}>{c.name}</text></g>))}</g>
-                {renderTerrainDecorations()}
-                <path d={generatePath()} fill="none" stroke="#795548" strokeWidth="0.4" strokeDasharray="1,1" className="opacity-50" filter="url(#ruggedPath)" /><path d={generateActivePath()} fill="none" stroke="#b71c1c" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" className="drop-shadow-sm transition-all duration-1000 ease-in-out" filter="url(#ruggedPath)" />
-                {MILESTONES.map((milestone, index) => { const isCurrent = index === currentStep; const isActive = index <= currentStep; const isHovered = hoveredIndex === index; const rVisual = isCurrent ? 2.5 : (isActive ? 1.5 : 1.2); return (<g key={milestone.id} onClick={() => onNodeClick(index)} onMouseEnter={() => setHoveredIndex(index)} onMouseLeave={() => setHoveredIndex(null)} className={`cursor-pointer transition-all duration-300 group ${isActive ? 'opacity-100' : 'opacity-60 hover:opacity-90'}`}><circle cx={milestone.coords.x} cy={milestone.coords.y} r="5" fill="transparent" /><circle cx={milestone.coords.x} cy={milestone.coords.y} r={rVisual} fill={isActive ? (isCurrent ? "#b71c1c" : "#d32f2f") : "#5d4037"} stroke={isActive ? "#fff" : "none"} strokeWidth={isCurrent ? 0.6 : 0.3} className={`transition-all duration-300 ease-out ${isCurrent ? 'drop-shadow-md' : ''}`} style={{ transformBox: 'fill-box', transformOrigin: 'center', transform: isHovered && !isCurrent ? 'scale(1.4)' : 'scale(1)' }} />{isCurrent && (<circle cx={milestone.coords.x} cy={milestone.coords.y} r="6" stroke="#b71c1c" strokeWidth="0.3" fill="none"><animate attributeName="r" from="2.5" to="8" dur="1.5s" repeatCount="indefinite" /><animate attributeName="opacity" from="0.6" to="0" dur="1.5s" repeatCount="indefinite" /></circle>)}<text x={milestone.coords.x} y={milestone.coords.y + 4} textAnchor="middle" className={`text-[2px] font-bold select-none pointer-events-none transition-all duration-300 ${isCurrent || isHovered ? 'fill-[#b71c1c] font-black scale-110' : 'fill-[#3e2723]'}`} style={{ textShadow: '0 1px 2px rgba(255,255,255,0.8)', fontFamily: 'serif' }}>{milestone.title}</text></g>); })}
-                <g style={{ transform: `translate(${MILESTONES[currentStep].coords.x}px, ${MILESTONES[currentStep].coords.y}px)`, transition: 'transform 1s cubic-bezier(0.4, 0, 0.2, 1)' }} className="pointer-events-none"><foreignObject x="-3" y="-3" width="6" height="6" className="overflow-visible"><div className="w-full h-full flex items-center justify-center"><Star size="100%" fill="#ffd600" stroke="#b71c1c" strokeWidth={2} className="animate-pulse drop-shadow-lg" /></div></foreignObject></g>
-              </svg>
+                <div className="h-8 w-px bg-stone-300"></div>
+                <div className={`flex flex-col md:flex-row items-center gap-2 md:gap-4 w-1/2 justify-center transition-transform ${moraleShaking ? 'translate-x-[-2px]' : ''}`}>
+                  <div className="flex items-center gap-2 text-red-700 font-bold text-sm uppercase"><Heart size={18} /> 士氣</div>
+                  <div className="w-full max-w-[140px] h-4 bg-stone-300 rounded-full overflow-hidden border border-stone-400 relative shadow-inner">
+                    <div className={`h-full transition-all duration-700 ${morale <= 30 ? 'bg-red-800' : 'bg-red-600'}`} style={{ width: `${morale}%` }}></div>
+                  </div>
+                  <span className={`font-mono font-bold w-8 text-right text-lg ${morale <= 30 ? 'text-red-700' : 'text-stone-700'}`}>{morale}</span>
+                </div>
             </div>
-            <div className="flex items-center gap-2 bg-[#e0f2f1] p-1 rounded-xl border border-[#8d6e63]">
-              <button onClick={() => onNodeClick(Math.max(0, currentStep - 1))} disabled={currentStep === 0} className="p-2 rounded-full hover:bg-[#b2dfdb] disabled:opacity-30 text-[#00695c] transition-colors"><ChevronLeft size={20} /></button>
-              <div ref={timelineRef} className="h-16 bg-[#fff8e1] rounded-lg border border-[#d7ccc8] shadow-inner overflow-x-auto whitespace-nowrap p-2 flex items-center gap-4 flex-1 no-scrollbar scroll-smooth">
-                {MILESTONES.map((m, idx) => { const isActive = idx === currentStep; const isPast = idx < currentStep; return (<div key={idx} onClick={() => onNodeClick(idx)} className={`inline-flex flex-col items-center justify-center gap-1 cursor-pointer p-1 rounded-lg transition-all duration-300 min-w-[80px] group ${isActive ? 'scale-110' : 'hover:bg-[#f9fbe7]/50'}`}><div className="relative flex items-center justify-center w-full h-5">{idx > 0 && (<div className={`absolute left-[-50%] right-[50%] h-0.5 top-2.5 -z-10 ${isActive || isPast ? 'bg-[#b71c1c]' : 'bg-[#d7ccc8]'}`}></div>)}{idx < MILESTONES.length - 1 && (<div className={`absolute left-[50%] right-[-50%] h-0.5 top-2.5 -z-10 ${isPast ? 'bg-[#b71c1c]' : 'bg-[#d7ccc8]'}`}></div>)}<div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center transition-all ${isActive ? 'bg-[#b71c1c] border-[#ffd600] w-4 h-4 shadow-md' : (isPast ? 'bg-[#b71c1c] border-[#b71c1c]' : 'bg-[#efebe9] border-[#a1887f]')}`}>{isActive && <div className="w-1 h-1 bg-[#ffd600] rounded-full animate-pulse"></div>}</div></div><span className={`text-[10px] font-bold font-serif ${isActive ? 'text-[#b71c1c]' : 'text-[#5d4037] opacity-70'}`}>{m.title}</span></div>); })}
-              </div>
-              <button onClick={() => onNodeClick(Math.min(MILESTONES.length - 1, currentStep + 1))} disabled={currentStep === MILESTONES.length - 1} className="p-2 rounded-full hover:bg-[#b2dfdb] disabled:opacity-30 text-[#00695c] transition-colors"><ChevronRight size={20} /></button>
-            </div>
-          </div>
-        );
-      };
-
-      // --- 7. 主應用組件 (App) ---
-      const App = () => {
-        const [currentStep, setCurrentStep] = useState(0);
-        const [isQuizOpen, setIsQuizOpen] = useState(false);
-        const [isGameOpen, setIsGameOpen] = useState(false);
-        const [showIntro, setShowIntro] = useState(true);
-        const [activeTab, setActiveTab] = useState('history');
-        const contentRef = useRef(null);
-        const currentData = MILESTONES[currentStep];
-
-        useEffect(() => { if (contentRef.current) contentRef.current.scrollTo({ top: 0, behavior: 'smooth' }); }, [currentStep, activeTab]);
-        const handleNext = () => { if (currentStep < MILESTONES.length - 1) { setCurrentStep(prev => prev + 1); setActiveTab('history'); } };
-        const handlePrev = () => { if (currentStep > 0) { setCurrentStep(prev => prev - 1); setActiveTab('history'); } };
-
-        return (
-          <div className="flex flex-col h-screen bg-[#e8e4d9] text-[#2c2420] font-sans overflow-hidden selection:bg-red-200 selection:text-red-900">
-            <header className="bg-gradient-to-r from-[#8b1c1c] to-[#a02626] text-[#fff8e1] px-4 py-3 shadow-xl flex justify-between items-center z-30 relative shrink-0 border-b-[3px] border-[#d4af37]">
-              <div className="flex items-center gap-3">
-                <div className="bg-[#d4af37] text-[#8b1c1c] p-2 rounded-lg shadow-inner border border-[#fdd835] ring-2 ring-[#8b1c1c]/50"><Star size={20} fill="currentColor" className="animate-pulse" /></div>
-                <div><h1 className="text-xl md:text-2xl font-bold tracking-[0.2em] leading-none font-serif text-[#fff8e1] drop-shadow-md">長征</h1><p className="text-[10px] text-[#ffecb3] font-medium tracking-wide opacity-90 mt-1">二萬五千里交互式教學地圖</p></div>
-              </div>
-              <div className="flex gap-3">
-                <button onClick={() => setIsGameOpen(true)} className="group relative px-4 py-1.5 bg-[#fbc02d] hover:bg-[#ffeb3b] text-[#5d4037] rounded-full font-bold text-xs md:text-sm shadow-lg transition-all hover:-translate-y-0.5 border border-[#fdd835]"><span className="flex items-center gap-1.5 relative z-10"><Trophy size={14} /> 生存挑戰</span><div className="absolute inset-0 bg-white/20 rounded-full blur opacity-0 group-hover:opacity-100 transition-opacity"></div></button>
-                <button onClick={() => setShowIntro(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-full text-xs md:text-sm text-[#ffecb3] transition-colors border border-white/10"><Info size={14} /> 指南</button>
-              </div>
-            </header>
-
-            <div className="flex flex-1 flex-col md:flex-row overflow-hidden relative">
-              <div className="w-full md:w-7/12 lg:w-2/3 h-[45vh] md:h-full relative z-0 bg-[#d7ccc8] shadow-[inset_-5px_0_15px_rgba(0,0,0,0.1)]">
-                 <MapView currentStep={currentStep} onNodeClick={(idx) => { setCurrentStep(idx); setActiveTab('history'); }} />
-                 <div className="absolute bottom-24 left-4 md:hidden bg-[#fff8e1]/95 backdrop-blur-sm px-4 py-2 rounded-full shadow-xl border border-[#d7ccc8] text-xs font-bold text-[#5d4037] flex items-center gap-2 z-10"><MapPin size={14} className="text-[#c62828]" /><span>{currentData.location}</span></div>
-              </div>
-
-              <div className="w-full md:w-5/12 lg:w-1/3 h-[55vh] md:h-full bg-paper flex flex-col shadow-2xl z-20 border-l border-[#bcaaa4] relative">
-                <div className="flex items-center justify-between p-3 bg-[#e6e2d3] border-b border-[#d7ccc8] shrink-0 shadow-sm relative z-20">
-                   <button onClick={handlePrev} disabled={currentStep === 0} className="flex items-center gap-1 pl-2 pr-3 py-2 rounded-lg text-[#5d4037] hover:bg-[#d7ccc8] disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm font-bold active:scale-95"><ChevronLeft size={18} /> 上一站</button>
-                   <div className="flex flex-col items-center"><div className="text-[9px] uppercase tracking-widest text-[#8d6e63] font-bold mb-0.5">當前進度</div><div className="bg-[#fff8e1] px-3 py-0.5 rounded border border-[#d7ccc8] shadow-inner flex items-center gap-1 text-sm font-bold font-mono text-[#3e2723]"><span className="text-[#c62828] text-base">{currentStep + 1}</span><span className="text-[#bdbdbd]">/</span><span>{MILESTONES.length}</span></div></div>
-                   <button onClick={handleNext} disabled={currentStep === MILESTONES.length - 1} className="flex items-center gap-1 pl-3 pr-2 py-2 rounded-lg bg-[#b71c1c] text-[#fff8e1] hover:bg-[#c62828] disabled:bg-[#d7ccc8] disabled:text-[#a1887f] disabled:cursor-not-allowed transition-all shadow-md active:scale-95 text-sm font-bold">下一站 <ChevronRight size={18} /></button>
-                </div>
-
-                <div ref={contentRef} className="flex-1 overflow-y-auto scroll-smooth bg-paper relative pb-24">
-                  <div className="px-6 pt-6 pb-2">
-                     <div className="flex items-center justify-between mb-3"><div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#efebe9] text-[#5d4037] border border-[#d7ccc8] text-xs font-bold uppercase tracking-wider shadow-sm"><MapPin size={12} className="text-[#c62828]" /> {currentData.location}</div><div className="text-xs text-[#8d6e63] font-serif font-bold tracking-wide italic border-b border-[#d7ccc8]">{currentData.date}</div></div>
-                     <h2 className="text-3xl md:text-4xl font-black text-[#3e2723] leading-tight tracking-tight font-serif mb-4 drop-shadow-sm">{currentData.title}</h2>
-                     <div className="inline-flex items-center gap-3 bg-white/60 px-3 py-1.5 rounded-r-xl border-l-4 border-[#ffb300] shadow-sm mb-2 backdrop-blur-sm"><div className={`p-1.5 rounded-full ${currentData.stat.icon === 'users' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>{currentData.stat.icon === 'users' ? <Users size={14}/> : <Info size={14} />}</div><div className="flex flex-col leading-none"><span className="text-[9px] text-[#8d6e63] font-bold uppercase mb-0.5">{currentData.stat.label}</span><span className="text-sm font-bold text-[#3e2723]">{currentData.stat.value}</span></div></div>
-                  </div>
-
-                  <div className="sticky top-0 z-20 bg-paper/95 backdrop-blur-sm px-6 pt-2 pb-0 shadow-sm border-b border-[#d7ccc8]">
-                      <div className="flex items-end gap-1">
-                         {['history', 'figures', 'survival'].map((tab) => (
-                            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-t-lg text-xs md:text-sm font-bold transition-all duration-200 border-t border-x relative top-[1px] ${activeTab === tab ? 'bg-white border-[#d7ccc8] text-[#b71c1c] shadow-[0_-2px_5px_rgba(0,0,0,0.05)] z-10' : 'bg-[#f5f5f5] border-transparent text-[#9e9e9e] hover:bg-[#eeeeee] hover:text-[#757575]'}`}>
-                               {tab === 'history' && <BookOpen size={14} />}{tab === 'figures' && <Users size={14} />}{tab === 'survival' && <Tent size={14} />}
-                               {tab === 'history' ? '歷史' : tab === 'figures' ? '人物' : '點滴'}
-                            </button>
-                         ))}
-                      </div>
-                  </div>
-
-                  <div className="p-6 bg-white min-h-[400px] animate-fade-in-zoom">
-                        {activeTab === 'history' && (<div className="space-y-6 animate-slide-up"><EventSchematic id={currentData.id} /><div className="relative pl-4 border-l-2 border-[#ffb300]"><h3 className="text-lg font-bold text-[#3e2723] mb-2 font-serif">事件經過</h3><p className="text-[#5d4037] leading-relaxed text-justify text-sm md:text-base">{currentData.description}</p></div><div className="bg-[#fffde7] p-5 rounded-xl border border-[#fff59d] shadow-sm relative overflow-hidden"><Star className="absolute -right-2 -top-2 text-[#fff176] opacity-50" size={60} /><h3 className="flex items-center gap-2 font-bold text-[#c62828] text-base mb-2 font-serif relative z-10"><Flag size={16} /> 歷史意義</h3><p className="text-[#4e342e] leading-relaxed text-justify text-sm font-medium relative z-10">{currentData.significance}</p></div></div>)}
-                        {activeTab === 'figures' && (<div className="space-y-4 animate-slide-up"><div className="bg-[#e3f2fd] p-4 rounded-xl border border-[#bbdefb] text-sm text-[#1565c0] flex gap-3 shadow-sm"><Info size={18} className="shrink-0 mt-0.5" /><p>歷史是由人民創造的，但英雄人物在關鍵時刻的抉擇往往決定了歷史的走向。</p></div><div className="grid gap-4">{currentData.figures.map((person, idx) => (<div key={idx} className="bg-white p-5 rounded-xl border border-[#e0e0e0] shadow-sm hover:shadow-md hover:border-[#b0bec5] transition-all flex flex-col gap-2 group"><div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-[#eceff1] flex items-center justify-center text-[#546e7a] font-serif font-bold text-lg border border-[#cfd8dc] group-hover:bg-[#37474f] group-hover:text-white transition-colors">{person.name.charAt(0)}</div><h3 className="font-bold text-lg text-[#37474f]">{person.name}</h3></div><span className="text-[10px] font-bold bg-[#eceff1] text-[#455a64] px-2 py-1 rounded shadow-sm">{person.role}</span></div><p className="text-[#546e7a] text-sm leading-relaxed pl-[3.25rem]">{person.desc}</p></div>))}</div></div>)}
-                        {activeTab === 'survival' && (<div className="space-y-6 animate-slide-up"><div className="bg-[#3e2723] rounded-xl shadow-lg border border-[#5d4037] overflow-hidden text-[#efebe9]"><div className="bg-gradient-to-r from-[#5d4037] to-[#4e342e] p-5 relative border-b border-[#6d4c41]"><div className="flex items-center gap-2 text-[#ffb74d] mb-1 opacity-90"><Tent size={16} /><span className="text-xs font-bold uppercase tracking-widest">行軍見聞</span></div><h3 className="font-serif text-2xl font-bold tracking-wide">{currentData.survival.title}</h3><Flame className="absolute right-4 bottom-[-10px] text-[#ffcc80] opacity-10 w-24 h-24 rotate-12" /></div><div className="p-6 bg-[url('https://www.transparenttextures.com/patterns/dark-leather.png')]"><p className="text-[#d7ccc8] text-base leading-loose font-serif first-letter:text-3xl first-letter:font-bold first-letter:text-[#ffb74d] first-letter:mr-1">{currentData.survival.content}</p></div></div><div className="bg-[#fff8e1] p-4 rounded-xl border border-[#ffecb3] flex items-center gap-4 shadow-sm"><div className="w-12 h-12 rounded-full bg-white flex items-center justify-center text-[#ffa000] border border-[#ffecb3] shadow-inner"><Scroll size={24} /></div><div><div className="text-xs font-bold text-[#ffb300] uppercase mb-0.5">歷史數據</div><div className="text-sm font-medium text-[#5d4037]"><span className="font-bold text-[#3e2723] mr-2">{currentData.stat.label}:</span>{currentData.stat.value}</div></div></div></div>)}
-                  </div>
-                </div>
-
-                <div className="absolute bottom-0 left-0 right-0 p-4 pt-8 bg-gradient-to-t from-white via-white to-transparent z-30 pointer-events-none flex justify-center">
-                   <button onClick={() => setIsQuizOpen(true)} className="pointer-events-auto w-full max-w-sm py-3 bg-gradient-to-r from-[#ffa000] to-[#ff6f00] hover:from-[#ffb300] hover:to-[#ff8f00] text-[#3e2723] font-bold rounded-xl shadow-[0_4px_10px_rgba(255,111,0,0.3)] hover:shadow-[0_6px_15px_rgba(255,111,0,0.4)] transform hover:-translate-y-1 active:translate-y-0 transition-all flex items-center justify-center gap-2 border border-[#ffe082]"><HelpCircle size={20} /> <span>隨堂知識問答</span></button>
-                </div>
-              </div>
-            </div>
-
-            <QuizModal quizzes={currentData.quizzes} isOpen={isQuizOpen} onClose={() => setIsQuizOpen(false)} />
-            <SurvivalGameModal milestones={MILESTONES} isOpen={isGameOpen} onClose={() => setIsGameOpen(false)} />
-
-            {showIntro && (
-              <div className="fixed inset-0 bg-[#263238]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in-zoom">
-                <div className="bg-[#fdfbf7] rounded-xl max-w-2xl w-full shadow-2xl overflow-hidden border-4 border-[#3e2723] flex flex-col max-h-[90vh] relative">
-                  <div className="absolute top-4 right-4 border-2 border-[#c62828] text-[#c62828] rounded px-2 py-1 text-xs font-bold uppercase -rotate-12 opacity-80 mix-blend-multiply pointer-events-none">TOP SECRET</div>
-                  <div className="bg-[#8b1c1c] p-6 text-[#fff8e1] flex justify-between items-start shrink-0 relative overflow-hidden shadow-md"><div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div><div className="relative z-10"><h2 className="text-3xl font-bold mb-1 tracking-widest font-serif">長征檔案</h2><p className="text-[#ffcdd2] text-sm font-medium tracking-wide">互動式歷史教學輔助系統</p></div><button onClick={() => setShowIntro(false)} className="relative z-10 text-[#ffcdd2] hover:text-white transition-colors bg-white/10 hover:bg-white/20 p-2 rounded-full"><X size={20} /></button></div>
-                  <div className="p-8 space-y-6 overflow-y-auto bg-paper">
-                    <p className="text-[#4e342e] text-lg font-serif italic text-center border-b border-[#d7ccc8] pb-4">"紅軍不怕遠征難，萬水千山只等閒。"</p>
-                    <div className="grid md:grid-cols-3 gap-4">
-                      <div className="bg-white p-4 rounded-lg border border-[#d7ccc8] shadow-sm hover:border-[#bcaaa4] transition-all text-center"><BookOpen size={28} className="mx-auto mb-2 text-[#8b1c1c]" /><h3 className="font-bold text-[#3e2723] mb-1">多維敘事</h3><p className="text-xs text-[#5d4037]">戰略地圖 x 戰術圖解</p></div>
-                      <div className="bg-white p-4 rounded-lg border border-[#d7ccc8] shadow-sm hover:border-[#bcaaa4] transition-all text-center"><Users size={28} className="mx-auto mb-2 text-[#0d47a1]" /><h3 className="font-bold text-[#3e2723] mb-1">人物聚焦</h3><p className="text-xs text-[#5d4037]">還原鮮活歷史群像</p></div>
-                      <div className="bg-white p-4 rounded-lg border border-[#d7ccc8] shadow-sm hover:border-[#bcaaa4] transition-all text-center"><Tent size={28} className="mx-auto mb-2 text-[#f57f17]" /><h3 className="font-bold text-[#3e2723] mb-1">生存體驗</h3><p className="text-xs text-[#5d4037]">數據模擬行軍挑戰</p></div>
-                    </div>
-                    <div className="group bg-[#fff8e1] p-5 rounded-xl border border-[#ffe082] flex items-center gap-4 cursor-pointer hover:shadow-md transition-all relative overflow-hidden" onClick={() => {setShowIntro(false); setIsGameOpen(true);}}><div className="bg-[#fbc02d] text-[#3e2723] p-3 rounded-full shrink-0 shadow-sm group-hover:scale-110 transition-transform z-10"><Trophy size={24} /></div><div className="flex-1 z-10"><div className="flex items-center gap-2 mb-1"><h4 className="font-bold text-[#3e2723] text-lg">挑戰模式：突圍</h4><span className="bg-[#c62828] text-white text-[10px] px-1.5 py-0.5 rounded font-bold">HARD</span></div><p className="text-xs text-[#5d4037]">扮演指揮官，在資源匱乏中做出艱難抉擇。能否帶領部隊到達陝北？</p></div><ChevronRight className="text-[#fbc02d] group-hover:translate-x-1 transition-transform z-10" /></div>
-                  </div>
-                  <div className="p-6 bg-[#efebe9] border-t border-[#d7ccc8] shrink-0"><button onClick={() => setShowIntro(false)} className="w-full py-3.5 bg-[#3e2723] text-[#fff8e1] font-bold rounded-lg hover:bg-[#4e342e] transition-all shadow-lg transform active:scale-[0.99] flex items-center justify-center gap-2 text-base tracking-wider">開啟檔案 <ChevronRight size={16} /></button></div>
-                </div>
+            {randomEvent && (
+              <div className="bg-red-100 border-b border-red-200 p-2 text-center text-red-800 font-bold flex items-center justify-center gap-2 shadow-sm">
+                <AlertTriangle size={18} />突發：{randomEvent}
               </div>
             )}
+            <div className="flex-1 overflow-y-auto p-6 md:p-8">
+                <div className="flex justify-between items-center mb-4 pb-2 border-b border-stone-200">
+                  <span className="text-xs font-bold text-stone-500 border border-stone-300 px-2 py-1 rounded bg-white">第 {currentStage + 1} 關</span>
+                  <span className="text-sm font-bold text-stone-700 font-serif tracking-wide">{currentMilestone.date}</span>
+                </div>
+                <h2 className="text-2xl md:text-3xl font-black text-stone-800 mb-4 font-serif">{currentMilestone.title}</h2>
+                <div className="bg-white p-6 rounded-xl border border-stone-300 mb-8 shadow-sm flex gap-4">
+                  <p className="text-base md:text-lg text-stone-700 font-medium leading-relaxed font-serif">{challenge.scenario}</p>
+                </div>
+                {feedback ? (
+                  <div className="animate-fade-in-zoom bg-orange-50 border-2 border-orange-100 rounded-xl p-8 shadow-lg text-center max-w-2xl mx-auto">
+                    <h3 className="text-xl font-bold text-stone-800 mb-2 font-serif">後果</h3>
+                    <p className="text-stone-600 mb-8 text-lg">{feedback}</p>
+                    <div className="flex justify-center gap-12 mb-8 border-t border-b border-orange-200 py-4">
+                      {lastChanges && (
+                        <>
+                          <div className={`flex flex-col items-center ${lastChanges.food === 0 ? 'opacity-50' : ''}`}>
+                            <span className="text-xs text-stone-500 font-bold uppercase mb-1">糧食變動</span>
+                            <span className={`text-2xl font-black ${lastChanges.food >= 0 ? 'text-green-600' : 'text-red-700'}`}>{lastChanges.food > 0 ? '+' : ''}{lastChanges.food}</span>
+                          </div>
+                          <div className={`flex flex-col items-center ${lastChanges.morale === 0 ? 'opacity-50' : ''}`}>
+                            <span className="text-xs text-stone-500 font-bold uppercase mb-1">士氣變動</span>
+                            <span className={`text-2xl font-black ${lastChanges.morale >= 0 ? 'text-green-600' : 'text-red-700'}`}>{lastChanges.morale > 0 ? '+' : ''}{lastChanges.morale}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <button onClick={nextStage} className="inline-flex items-center gap-2 px-8 py-3 bg-stone-800 text-[#fff8e1] rounded-lg font-bold hover:bg-stone-900 transition-all shadow-md">
+                      {currentStage < milestones.length - 1 ? "繼續前進" : "查看結果"} <ArrowRight size={20} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {challenge.options.map((option, idx) => (
+                      <button key={idx} onClick={() => handleOptionSelect(option)} className="text-left p-5 bg-white border-2 border-stone-200 rounded-xl hover:border-red-800 hover:bg-red-50 hover:shadow-md transition-all group relative overflow-hidden flex flex-col h-full">
+                        <div className="flex gap-3">
+                          <span className="flex-shrink-0 w-8 h-8 rounded-full bg-stone-100 text-stone-600 flex items-center justify-center font-bold text-sm group-hover:bg-red-100 group-hover:text-red-800 transition-colors border border-stone-300">
+                            {String.fromCharCode(65 + idx)}
+                          </span>
+                          <span className="font-bold text-stone-800 text-base md:text-lg group-hover:text-red-800 leading-tight">
+                            {option.label}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+            </div>
           </div>
-        );
-      };
+        )}
 
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(<App />);
+        {gameState === 'gameover' && (
+          <div className="p-8 flex flex-col items-center text-center justify-center h-full space-y-6 bg-red-50">
+              <div className="relative"><Skull size={80} className="text-red-700 animate-pulse" /></div>
+              <h2 className="text-4xl font-black text-red-800 font-serif">長征失敗</h2>
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-red-200 max-w-md">
+                <p className="text-red-700 text-lg font-medium">
+                  {food <= 0 ? "糧食耗盡，部隊飢寒交迫，倒在了雪山草地之中。" : "士氣崩潰，部隊渙散，在敵人的圍追堵截下失敗了。"}
+                </p>
+              </div>
+              <button onClick={resetGame} className="flex items-center gap-2 px-8 py-3 bg-red-800 text-white font-bold rounded-xl hover:bg-red-900 transition-all shadow-lg mt-4">
+                再來一次
+              </button>
+          </div>
+        )}
+
+        {gameState === 'result' && (
+          <div className="p-8 flex flex-col items-center text-center justify-center h-full space-y-6 bg-amber-50">
+              <div className="relative animate-bounce">
+                <Trophy size={100} className="text-amber-500 drop-shadow-xl" />
+                <Star size={40} className="text-red-600 absolute -top-4 -right-4 animate-spin-slow drop-shadow-md" fill="currentColor" />
+              </div>
+              <div>
+                <h2 className="text-4xl font-black text-amber-700 mb-2 font-serif">長征勝利！</h2>
+                <p className="text-amber-600 text-lg max-w-md mx-auto font-medium">你克服了重重困難，帶領紅軍到達陝北！</p>
+              </div>
+              <div className="bg-white p-8 rounded-xl shadow-xl border-4 border-amber-400 w-full max-w-sm relative overflow-hidden">
+                <div className="text-xs text-stone-500 font-bold uppercase tracking-widest mb-2">獲得榮譽稱號</div>
+                <div className={`text-3xl font-black ${rank.color} flex items-center justify-center gap-2 mb-2 font-serif`}>
+                  <Medal size={32} /> {rank.title}
+                </div>
+                <p className="text-sm text-stone-600 italic border-b border-orange-100 pb-4 mb-4">{rank.desc}</p>
+                <div className="flex justify-between items-end">
+                  <div className="text-left">
+                    <div className="text-xs text-stone-500 font-bold uppercase">總得分</div>
+                    <div className="text-4xl font-black text-stone-800 leading-none">{totalScore}</div>
+                  </div>
+                  <div className="flex gap-4 text-sm font-bold text-stone-700">
+                    <div className="flex flex-col items-center"><Wheat size={16} className="text-amber-500"/> <span>{food}</span></div>
+                    <div className="flex flex-col items-center"><Heart size={16} className="text-red-600"/> <span>{morale}</span></div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-4 mt-2">
+                <button onClick={onClose} className="px-6 py-2 border-2 border-stone-300 text-stone-600 font-bold rounded-lg hover:bg-stone-100 transition-all">返回地圖</button>
+                <button onClick={resetGame} className="flex items-center gap-2 px-6 py-2 bg-red-800 text-white font-bold rounded-lg hover:bg-red-900 transition-all shadow-md">再玩一次</button>
+              </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// LeafletMapView.tsx
+const LeafletMapView = ({ currentStep, onNodeClick }) => {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const polylineRef = useRef(null);
+
+  useEffect(() => {
+    if (!mapInstanceRef.current && mapRef.current) {
+      const map = L.map(mapRef.current, {
+        zoomControl: false,
+        attributionControl: false
+      }).setView(MILESTONES[0].coords, 6);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      mapInstanceRef.current = map;
+
+      const createIcon = (isActive, idx) => L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div class="marker-pin ${isActive ? 'active' : ''}">${isActive ? '★' : idx + 1}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+
+      const latlngs = MILESTONES.map(m => m.coords);
+      polylineRef.current = L.polyline(latlngs, { color: '#b71c1c', weight: 4, dashArray: '5, 10', opacity: 0.7 }).addTo(map);
+
+      MILESTONES.forEach((m, idx) => {
+         const marker = L.marker(m.coords, { icon: createIcon(false, idx) })
+           .addTo(map)
+           .bindPopup(`<b>${m.title}</b><br>${m.date}`)
+           .on('click', () => onNodeClick(idx));
+         markersRef.current.push(marker);
+      });
+    }
+
+    return () => {
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (map && markersRef.current.length > 0) {
+      markersRef.current.forEach((marker, idx) => {
+         const isActive = idx === currentStep;
+         const iconHtml = `<div class="marker-pin ${isActive ? 'active' : ''}">${isActive ? '★' : idx + 1}</div>`;
+         const newIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: iconHtml,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+         });
+         marker.setIcon(newIcon);
+         
+         if (isActive) {
+           marker.openPopup();
+         } else {
+           marker.closePopup();
+         }
+      });
+
+      map.flyTo(MILESTONES[currentStep].coords, 8, {
+         animate: true,
+         duration: 1.5
+      });
+    }
+  }, [currentStep]);
+
+  return (
+     <div className="flex flex-col w-full h-full gap-2 p-2">
+       <div id="map-container" className="relative flex-1 rounded-xl overflow-hidden shadow-inner border-4 border-[#8d6e63]">
+          <div ref={mapRef} className="w-full h-full"></div>
+          <div className="absolute top-4 right-4 z-[1000] bg-white/90 backdrop-blur px-3 py-1 rounded shadow border border-[#8d6e63] text-xs font-bold text-[#5d4037]">
+             OpenStreetMap 視圖
+          </div>
+       </div>
+       
+       <div className="flex items-center gap-2 bg-[#e0f2f1] p-1 rounded-xl border border-[#8d6e63]">
+          <button onClick={() => onNodeClick(Math.max(0, currentStep - 1))} disabled={currentStep === 0} className="p-2 rounded-full hover:bg-[#b2dfdb] disabled:opacity-30 text-[#00695c] transition-colors"><ChevronLeft size={20} /></button>
+          <div className="h-16 bg-[#fff8e1] rounded-lg border border-[#d7ccc8] shadow-inner overflow-x-auto whitespace-nowrap p-2 flex items-center gap-4 flex-1 scroll-smooth no-scrollbar">
+            {MILESTONES.map((m, idx) => {
+              const isActive = idx === currentStep;
+              return (
+                <div key={idx} onClick={() => onNodeClick(idx)} className={`inline-flex flex-col items-center justify-center gap-1 cursor-pointer p-1 rounded-lg transition-all duration-300 min-w-[80px] group ${isActive ? 'scale-110 bg-[#f9fbe7]' : 'hover:bg-[#f9fbe7]/50'}`}>
+                  <div className="relative flex items-center justify-center w-full h-5">
+                     {idx > 0 && <div className={`absolute left-[-50%] right-[50%] h-0.5 top-2.5 -z-10 ${idx <= currentStep ? 'bg-[#b71c1c]' : 'bg-[#d7ccc8]'}`}></div>}
+                     {idx < MILESTONES.length - 1 && <div className={`absolute left-[50%] right-[-50%] h-0.5 top-2.5 -z-10 ${idx < currentStep ? 'bg-[#b71c1c]' : 'bg-[#d7ccc8]'}`}></div>}
+                     <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center transition-all ${isActive ? 'bg-[#b71c1c] border-[#ffd600] w-4 h-4 shadow-md' : (idx < currentStep ? 'bg-[#b71c1c] border-[#b71c1c]' : 'bg-[#efebe9] border-[#a1887f]')}`}>{isActive && <div className="w-1 h-1 bg-[#ffd600] rounded-full animate-pulse"></div>}</div>
+                  </div>
+                  <span className={`text-[10px] font-bold font-serif ${isActive ? 'text-[#b71c1c]' : 'text-[#5d4037] opacity-70'}`}>{m.title}</span>
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={() => onNodeClick(Math.min(MILESTONES.length - 1, currentStep + 1))} disabled={currentStep === MILESTONES.length - 1} className="p-2 rounded-full hover:bg-[#b2dfdb] disabled:opacity-30 text-[#00695c] transition-colors"><ChevronRight size={20} /></button>
+       </div>
+     </div>
+  );
+};
+
+// App.tsx
+const App = () => {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [isQuizOpen, setIsQuizOpen] = useState(false);
+  const [isGameOpen, setIsGameOpen] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
+  const [activeTab, setActiveTab] = useState('history');
+  const contentRef = useRef(null);
+  const currentData = MILESTONES[currentStep];
+
+  useEffect(() => { 
+    if (contentRef.current) contentRef.current.scrollTo({ top: 0, behavior: 'smooth' }); 
+  }, [currentStep, activeTab]);
+
+  const handleNext = () => { if (currentStep < MILESTONES.length - 1) { setCurrentStep(prev => prev + 1); setActiveTab('history'); } };
+  const handlePrev = () => { if (currentStep > 0) { setCurrentStep(prev => prev - 1); setActiveTab('history'); } };
+
+  return (
+    <div className="flex flex-col h-screen bg-[#e8e4d9] text-[#2c2420] font-sans overflow-hidden selection:bg-red-200 selection:text-red-900">
+      <header className="bg-gradient-to-r from-[#8b1c1c] to-[#a02626] text-[#fff8e1] px-4 py-3 shadow-xl flex justify-between items-center z-30 relative shrink-0 border-b-[3px] border-[#d4af37]">
+        <div className="flex items-center gap-3">
+          <div className="bg-[#d4af37] text-[#8b1c1c] p-2 rounded-lg shadow-inner border border-[#fdd835] ring-2 ring-[#8b1c1c]/50">
+            <Star size={20} fill="currentColor" className="animate-pulse" />
+          </div>
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold tracking-[0.2em] leading-none font-serif text-[#fff8e1] drop-shadow-md">長征</h1>
+            <p className="text-[10px] text-[#ffecb3] font-medium tracking-wide opacity-90 mt-1">二萬五千里交互式教學地圖</p>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={() => setIsGameOpen(true)} className="group relative px-4 py-1.5 bg-[#fbc02d] hover:bg-[#ffeb3b] text-[#5d4037] rounded-full font-bold text-xs md:text-sm shadow-lg transition-all hover:-translate-y-0.5 border border-[#fdd835]">
+            <span className="flex items-center gap-1.5 relative z-10"><Trophy size={14} /> 生存挑戰</span>
+            <div className="absolute inset-0 bg-white/20 rounded-full blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
+          </button>
+          <button onClick={() => setShowIntro(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-full text-xs md:text-sm text-[#ffecb3] transition-colors border border-white/10">
+            <Info size={14} /> 指南
+          </button>
+        </div>
+      </header>
+
+      <div className="flex flex-1 flex-col md:flex-row overflow-hidden relative">
+        <div className="w-full md:w-7/12 lg:w-2/3 h-[45vh] md:h-full relative z-0 bg-[#d7ccc8] shadow-[inset_-5px_0_15px_rgba(0,0,0,0.1)]">
+           <LeafletMapView currentStep={currentStep} onNodeClick={(idx) => { setCurrentStep(idx); setActiveTab('history'); }} />
+        </div>
+
+        <div className="w-full md:w-5/12 lg:w-1/3 h-[55vh] md:h-full bg-[url('https://www.transparenttextures.com/patterns/cream-dust.png')] bg-[#fdfbf7] flex flex-col shadow-2xl z-20 border-l border-[#bcaaa4] relative">
+          <div className="flex items-center justify-between p-3 bg-[#e6e2d3] border-b border-[#d7ccc8] shrink-0 shadow-sm relative z-20">
+             <button onClick={handlePrev} disabled={currentStep === 0} className="flex items-center gap-1 pl-2 pr-3 py-2 rounded-lg text-[#5d4037] hover:bg-[#d7ccc8] disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm font-bold active:scale-95">
+               <ChevronLeft size={18} /> 上一站
+             </button>
+             <div className="flex flex-col items-center">
+               <div className="text-[9px] uppercase tracking-widest text-[#8d6e63] font-bold mb-0.5">當前進度</div>
+               <div className="bg-[#fff8e1] px-3 py-0.5 rounded border border-[#d7ccc8] shadow-inner flex items-center gap-1 text-sm font-bold font-mono text-[#3e2723]">
+                 <span className="text-[#c62828] text-base">{currentStep + 1}</span><span className="text-[#bdbdbd]">/</span><span>{MILESTONES.length}</span>
+               </div>
+             </div>
+             <button onClick={handleNext} disabled={currentStep === MILESTONES.length - 1} className="flex items-center gap-1 pl-3 pr-2 py-2 rounded-lg bg-[#b71c1c] text-[#fff8e1] hover:bg-[#c62828] disabled:bg-[#d7ccc8] disabled:text-[#a1887f] disabled:cursor-not-allowed transition-all shadow-md active:scale-95 text-sm font-bold">
+               下一站 <ChevronRight size={18} />
+             </button>
+          </div>
+
+          <div ref={contentRef} className="flex-1 overflow-y-auto scroll-smooth relative pb-24">
+            <div className="px-6 pt-6 pb-2">
+               <div className="flex items-center justify-between mb-3">
+                 <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#efebe9] text-[#5d4037] border border-[#d7ccc8] text-xs font-bold uppercase tracking-wider shadow-sm">
+                   <MapPin size={12} className="text-[#c62828]" /> {currentData.location}
+                 </div>
+                 <div className="text-xs text-[#8d6e63] font-serif font-bold tracking-wide italic border-b border-[#d7ccc8]">{currentData.date}</div>
+               </div>
+               <h2 className="text-3xl md:text-4xl font-black text-[#3e2723] leading-tight tracking-tight font-serif mb-4 drop-shadow-sm">{currentData.title}</h2>
+               <div className="inline-flex items-center gap-3 bg-white/60 px-3 py-1.5 rounded-r-xl border-l-4 border-[#ffb300] shadow-sm mb-2 backdrop-blur-sm">
+                 <div className={`p-1.5 rounded-full ${currentData.stat.icon === 'users' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>
+                   {currentData.stat.icon === 'users' ? <Users size={14}/> : <Info size={14} />}
+                 </div>
+                 <div className="flex flex-col leading-none">
+                   <span className="text-[9px] text-[#8d6e63] font-bold uppercase mb-0.5">{currentData.stat.label}</span>
+                   <span className="text-sm font-bold text-[#3e2723]">{currentData.stat.value}</span>
+                 </div>
+               </div>
+            </div>
+
+            <div className="sticky top-0 z-20 bg-[#fdfbf7]/95 backdrop-blur-sm px-6 pt-2 pb-0 shadow-sm border-b border-[#d7ccc8]">
+                <div className="flex items-end gap-1">
+                   {[
+                     { id: 'history', label: '歷史', icon: BookOpen },
+                     { id: 'figures', label: '人物', icon: Users },
+                     { id: 'survival', label: '點滴', icon: ScrollText }
+                   ].map((tab) => (
+                      <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-t-lg text-xs md:text-sm font-bold transition-all duration-200 border-t border-x relative top-[1px] ${activeTab === tab.id ? 'bg-white border-[#d7ccc8] text-[#b71c1c] shadow-[0_-2px_5px_rgba(0,0,0,0.05)] z-10' : 'bg-[#f5f5f5] border-transparent text-[#9e9e9e] hover:bg-[#eeeeee] hover:text-[#757575]'}`}>
+                         <tab.icon size={14} /> {tab.label}
+                      </button>
+                   ))}
+                </div>
+            </div>
+
+            <div className="p-6 bg-white min-h-[400px] animate-fade-in-zoom">
+                  {activeTab === 'history' && (
+                    <div className="space-y-6">
+                      <EventSchematic id={currentData.id} />
+                      <div className="relative pl-4 border-l-2 border-[#ffb300]">
+                        <h3 className="text-lg font-bold text-[#3e2723] mb-2 font-serif">事件經過</h3>
+                        <p className="text-[#5d4037] leading-relaxed text-justify text-sm md:text-base">{currentData.description}</p>
+                      </div>
+                      <div className="bg-[#fffde7] p-5 rounded-xl border border-[#fff59d] shadow-sm relative overflow-hidden">
+                        <Star className="absolute -right-2 -top-2 text-[#fff176] opacity-50" size={60} />
+                        <h3 className="flex items-center gap-2 font-bold text-[#c62828] text-base mb-2 font-serif relative z-10">
+                          <Flag size={16} /> 歷史意義
+                        </h3>
+                        <p className="text-[#4e342e] leading-relaxed text-justify text-sm font-medium relative z-10">{currentData.significance}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'figures' && (
+                    <div className="space-y-4">
+                      <div className="bg-[#e3f2fd] p-4 rounded-xl border border-[#bbdefb] text-sm text-[#1565c0] flex gap-3 shadow-sm">
+                        <Info size={18} className="shrink-0 mt-0.5" />
+                        <p>歷史是由人民創造的，但英雄人物在關鍵時刻的抉擇往往決定了歷史的走向。</p>
+                      </div>
+                      <div className="grid gap-4">
+                        {currentData.figures.map((person, idx) => (
+                          <div key={idx} className="bg-white p-5 rounded-xl border border-[#e0e0e0] shadow-sm hover:shadow-md hover:border-[#b0bec5] transition-all flex flex-col gap-2 group">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-[#eceff1] flex items-center justify-center text-[#546e7a] font-serif font-bold text-lg border border-[#cfd8dc] group-hover:bg-[#37474f] group-hover:text-white transition-colors">
+                                  {person.name.charAt(0)}
+                                </div>
+                                <h3 className="font-bold text-lg text-[#37474f]">{person.name}</h3>
+                              </div>
+                              <span className="text-[10px] font-bold bg-[#eceff1] text-[#455a64] px-2 py-1 rounded shadow-sm">{person.role}</span>
+                            </div>
+                            <p className="text-[#546e7a] text-sm leading-relaxed pl-[3.25rem]">{person.desc}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'survival' && (
+                    <div className="space-y-6">
+                      <div className="bg-[#3e2723] rounded-xl shadow-lg border border-[#5d4037] overflow-hidden text-[#efebe9]">
+                        <div className="bg-gradient-to-r from-[#5d4037] to-[#4e342e] p-5 relative border-b border-[#6d4c41]">
+                          <div className="flex items-center gap-2 text-[#ffb74d] mb-1 opacity-90">
+                            <Tent size={16} />
+                            <span className="text-xs font-bold uppercase tracking-widest">行軍見聞</span>
+                          </div>
+                          <h3 className="font-serif text-2xl font-bold tracking-wide">{currentData.survival.title}</h3>
+                          <Flame className="absolute right-4 bottom-[-10px] text-[#ffcc80] opacity-10 w-24 h-24 rotate-12" />
+                        </div>
+                        <div className="p-6 bg-[url('https://www.transparenttextures.com/patterns/dark-leather.png')]">
+                          <p className="text-[#d7ccc8] text-base leading-loose font-serif first-letter:text-3xl first-letter:font-bold first-letter:text-[#ffb74d] first-letter:mr-1">
+                            {currentData.survival.content}
+                          </p>
+                        </div>
+                      </div>
+
+                      {currentData.survival.poem && (
+                        <div className="bg-stone-50 p-6 rounded-xl border border-stone-200 shadow-sm relative overflow-hidden group hover:border-stone-300 transition-colors">
+                          <div className="absolute top-3 right-4 text-stone-200 group-hover:text-stone-300 transition-colors">
+                            <Music size={40} />
+                          </div>
+                          <div className="relative z-10">
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="bg-stone-200 text-stone-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">
+                                {currentData.survival.poem.source || '詩詞'}
+                              </span>
+                            </div>
+                            <p className="text-lg font-serif font-bold text-stone-800 leading-relaxed mb-2 whitespace-pre-wrap">
+                              {currentData.survival.poem.text}
+                            </p>
+                            {currentData.survival.poem.author && (
+                              <p className="text-right text-sm text-stone-500 font-serif italic">
+                                —— {currentData.survival.poem.author}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+            </div>
+          </div>
+
+          <div className="absolute bottom-0 left-0 right-0 p-4 pt-8 bg-gradient-to-t from-white via-white to-transparent z-30 pointer-events-none flex justify-center">
+             <button onClick={() => setIsQuizOpen(true)} className="pointer-events-auto w-full max-w-sm py-3 bg-gradient-to-r from-[#ffa000] to-[#ff6f00] hover:from-[#ffb300] hover:to-[#ff8f00] text-[#3e2723] font-bold rounded-xl shadow-[0_4px_10px_rgba(255,111,0,0.3)] hover:shadow-[0_6px_15px_rgba(255,111,0,0.4)] transform hover:-translate-y-1 active:translate-y-0 transition-all flex items-center justify-center gap-2 border border-[#ffe082]">
+               <HelpCircle size={20} /> <span>隨堂知識問答</span>
+             </button>
+          </div>
+        </div>
+      </div>
+
+      <QuizModal quizzes={currentData.quizzes} isOpen={isQuizOpen} onClose={() => setIsQuizOpen(false)} />
+      <SurvivalGameModal milestones={MILESTONES} isOpen={isGameOpen} onClose={() => setIsGameOpen(false)} />
+
+      {showIntro && (
+        <div className="fixed inset-0 bg-[#263238]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in-zoom">
+          <div className="bg-[#fdfbf7] rounded-xl max-w-2xl w-full shadow-2xl overflow-hidden border-4 border-[#3e2723] flex flex-col max-h-[90vh] relative">
+            <div className="absolute top-4 right-4 border-2 border-[#c62828] text-[#c62828] rounded px-2 py-1 text-xs font-bold uppercase -rotate-12 opacity-80 mix-blend-multiply pointer-events-none">TOP SECRET</div>
+            <div className="bg-[#8b1c1c] p-6 text-[#fff8e1] flex justify-between items-start shrink-0 relative overflow-hidden shadow-md">
+              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+              <div className="relative z-10">
+                <h2 className="text-3xl font-bold mb-1 tracking-widest font-serif">長征檔案</h2>
+                <p className="text-[#ffcdd2] text-sm font-medium tracking-wide">互動式歷史教學輔助系統</p>
+              </div>
+              <button onClick={() => setShowIntro(false)} className="relative z-10 text-[#ffcdd2] hover:text-white transition-colors bg-white/10 hover:bg-white/20 p-2 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 space-y-6 overflow-y-auto bg-[url('https://www.transparenttextures.com/patterns/cream-dust.png')]">
+              <p className="text-[#4e342e] text-lg font-serif italic text-center border-b border-[#d7ccc8] pb-4">"紅軍不怕遠征難，萬水千山只等閒。"</p>
+              <div className="grid md:grid-cols-3 gap-4">
+                <div className="bg-white p-4 rounded-lg border border-[#d7ccc8] shadow-sm hover:border-[#bcaaa4] transition-all text-center">
+                  <BookOpen size={28} className="mx-auto mb-2 text-[#8b1c1c]" />
+                  <h3 className="font-bold text-[#3e2723] mb-1">多維敘事</h3>
+                  <p className="text-xs text-[#5d4037]">戰略地圖 x 戰術圖解</p>
+                </div>
+                <div className="bg-white p-4 rounded-lg border border-[#d7ccc8] shadow-sm hover:border-[#bcaaa4] transition-all text-center">
+                  <Users size={28} className="mx-auto mb-2 text-[#0d47a1]" />
+                  <h3 className="font-bold text-[#3e2723] mb-1">人物聚焦</h3>
+                  <p className="text-xs text-[#5d4037]">還原鮮活歷史群像</p>
+                </div>
+                <div className="bg-white p-4 rounded-lg border border-[#d7ccc8] shadow-sm hover:border-[#bcaaa4] transition-all text-center">
+                  <Tent size={28} className="mx-auto mb-2 text-[#f57f17]" />
+                  <h3 className="font-bold text-[#3e2723] mb-1">生存體驗</h3>
+                  <p className="text-xs text-[#5d4037]">數據模擬行軍挑戰</p>
+                </div>
+              </div>
+              <div className="group bg-[#fff8e1] p-5 rounded-xl border border-[#ffe082] flex items-center gap-4 cursor-pointer hover:shadow-md transition-all relative overflow-hidden" onClick={() => {setShowIntro(false); setIsGameOpen(true);}}>
+                <div className="bg-[#fbc02d] text-[#3e2723] p-3 rounded-full shrink-0 shadow-sm group-hover:scale-110 transition-transform z-10">
+                  <Trophy size={24} />
+                </div>
+                <div className="flex-1 z-10">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h4 className="font-bold text-[#3e2723] text-lg">挑戰模式：突圍</h4>
+                    <span className="bg-[#c62828] text-white text-[10px] px-1.5 py-0.5 rounded font-bold">HARD</span>
+                  </div>
+                  <p className="text-xs text-[#5d4037]">扮演指揮官，在資源匱乏中做出艱難抉擇。能否帶領部隊到達陝北？</p>
+                </div>
+                <ChevronRight className="text-[#fbc02d] group-hover:translate-x-1 transition-transform z-10" />
+              </div>
+            </div>
+            <div className="p-6 bg-[#efebe9] border-t border-[#d7ccc8] shrink-0">
+              <button onClick={() => setShowIntro(false)} className="w-full py-3.5 bg-[#3e2723] text-[#fff8e1] font-bold rounded-lg hover:bg-[#4e342e] transition-all shadow-lg transform active:scale-[0.99] flex items-center justify-center gap-2 text-base tracking-wider">
+                開啟檔案 <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- Index ---
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+
+const root = createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
     </script>
-  </body>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>
